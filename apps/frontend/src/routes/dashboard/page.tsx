@@ -1,0 +1,113 @@
+import AddIcon from "@mui/icons-material/Add";
+import PersonAddAlt1Icon from "@mui/icons-material/PersonAddAlt1";
+import { Alert, Box, Button, Card, CardContent, CircularProgress, Paper, Stack, Typography } from "@mui/material";
+import { useNavigate } from "react-router-dom";
+import { useWorkspace } from "../../hooks/use-workspace-context";
+import { buildLinksPath, buildOrganizationPath } from "../../lib/routes";
+
+const StatCard = (props: { label: string; value: number; testId: string }) => (
+  <Paper sx={{ flex: 1, p: 2.5, border: "1px solid rgba(255,255,255,0.08)" }}>
+    <Typography color="text.secondary">{props.label}</Typography>
+    <Typography variant="h4" sx={{ fontWeight: 800 }} data-testid={props.testId}>
+      {props.value}
+    </Typography>
+  </Paper>
+);
+
+export function DashboardPage() {
+  const navigate = useNavigate();
+  const { activeOrganization, invitations, links, loadingLinks, members, teams } = useWorkspace();
+  const recentLinks = links.slice(0, 5);
+  const pendingInvitations = invitations.filter((invitation) => invitation.status === "pending").length;
+
+  return (
+    <Stack spacing={3}>
+      <Stack
+        direction={{ xs: "column", md: "row" }}
+        spacing={2}
+        sx={{ justifyContent: "space-between", alignItems: { md: "center" } }}
+      >
+        <Box>
+          <Typography variant="h4" sx={{ fontWeight: 800 }}>
+            Overview
+          </Typography>
+          <Typography color="text.secondary">
+            {activeOrganization
+              ? `What is happening in ${activeOrganization.name}.`
+              : "Choose an organization to get started."}
+          </Typography>
+        </Box>
+        <Stack direction="row" spacing={1}>
+          <Button
+            variant="outlined"
+            startIcon={<PersonAddAlt1Icon />}
+            onClick={() => navigate(buildOrganizationPath(activeOrganization, "organization"))}
+          >
+            Invite member
+          </Button>
+          <Button
+            variant="contained"
+            startIcon={<AddIcon />}
+            disabled={!teams.length}
+            onClick={() => navigate(buildLinksPath(activeOrganization))}
+          >
+            Create link
+          </Button>
+        </Stack>
+      </Stack>
+
+      <Stack direction={{ xs: "column", md: "row" }} spacing={2}>
+        <StatCard label="Short links" value={links.length} testId="dashboard-links-count" />
+        <StatCard label="Teams" value={teams.length} testId="dashboard-teams-count" />
+        <StatCard label="Members" value={members.length} testId="dashboard-members-count" />
+        <StatCard label="Pending invitations" value={pendingInvitations} testId="dashboard-invitations-count" />
+      </Stack>
+
+      <Card sx={{ border: "1px solid rgba(255,255,255,0.08)" }}>
+        <CardContent>
+          <Stack direction="row" sx={{ justifyContent: "space-between", alignItems: "center", mb: 2 }}>
+            <Typography variant="h6" sx={{ fontWeight: 700 }}>
+              Recent links
+            </Typography>
+            <Button size="small" onClick={() => navigate(buildLinksPath(activeOrganization))}>
+              View all
+            </Button>
+          </Stack>
+          {loadingLinks ? <CircularProgress size={20} /> : null}
+          {!loadingLinks && !recentLinks.length ? (
+            <Alert severity="info">
+              {teams.length
+                ? "No links yet. Create your first short link from the Links page."
+                : "Create a team first, then add links to it."}
+            </Alert>
+          ) : null}
+          <Stack spacing={1}>
+            {recentLinks.map((link) => (
+              <Paper
+                key={link.id}
+                sx={{ p: 2, border: "1px solid rgba(255,255,255,0.06)", cursor: "pointer" }}
+                onClick={() => navigate(buildLinksPath(activeOrganization, link.id))}
+              >
+                <Stack direction={{ xs: "column", sm: "row" }} spacing={1} sx={{ justifyContent: "space-between" }}>
+                  <Box sx={{ minWidth: 0 }}>
+                    <Typography sx={{ fontWeight: 700 }}>{link.title ?? link.slug}</Typography>
+                    <Typography
+                      variant="body2"
+                      color="text.secondary"
+                      sx={{ overflow: "hidden", textOverflow: "ellipsis" }}
+                    >
+                      {link.targetUrl}
+                    </Typography>
+                  </Box>
+                  <Typography variant="body2" color="text.secondary">
+                    {link.teamName ?? ""} · {link.isActive ? "active" : "inactive"} · {link.redirectStatus}
+                  </Typography>
+                </Stack>
+              </Paper>
+            ))}
+          </Stack>
+        </CardContent>
+      </Card>
+    </Stack>
+  );
+}
