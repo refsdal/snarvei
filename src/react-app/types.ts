@@ -1,4 +1,4 @@
-import type { AnalyticsSummaryDto, HistoryItemDto, LinkDto, TeamMemberDto } from "../shared/api-types";
+import type { AnalyticsSummaryDto, HistoryItemDto, LinkDto, TeamMemberDto } from "./lib/api-types";
 
 export type Team = {
   id: string;

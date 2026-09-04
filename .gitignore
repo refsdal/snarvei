@@ -1,13 +1,22 @@
 node_modules/
 dist/
-.wrangler/
-.dev.vars*
-!.dev.vars.example
-.env*
-!.env.example
 coverage/
-playwright-report/
-test-results/
 *.tsbuildinfo
 .idea/
 .playwright-mcp/
+.superpowers/
+.DS_Store
+.env
+.env.*
+!.env.example
+
+# apps/server embeds the SPA build from here; the committed placeholder
+# index.html is repo content, not a build artifact.
+!apps/server/internal/web/dist/
+!apps/server/internal/web/dist/index.html
+
+# Playwright (phase 5)
+e2e/test-results/
+e2e/playwright-report/
+test-results/
+playwright-report/
