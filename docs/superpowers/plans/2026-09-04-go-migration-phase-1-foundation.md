@@ -54,6 +54,7 @@ apps/server/internal/api/{api.go,system.go,api_test.go,spec_sync_test.go,generat
 apps/server/internal/api/gen/{cfg-server.yaml,cfg-types.yaml,server.gen.go,types.gen.go}
 apps/server/internal/api/respond/respond.go
 .github/workflows/test.yml  ci.yml  .github/dependabot.yml
+e2e/{playwright.config.ts,tsconfig.json,smoke.spec.ts}  scripts/e2e-stack.sh
 ```
 
 Deleted: `src/`, `tests/`, `public/_headers`, `index.html`, `wrangler.jsonc`, `worker-configuration.d.ts`, `.wrangler/`, `drizzle.config.ts`, `vitest.config.mts`, `playwright.config.ts`, `tsconfig.app.json`, `tsconfig.node.json`, `tsconfig.worker.json`, `eslint.config.js`, `.prettierrc`, `.prettierignore`, `.nvmrc`, `pnpm-lock.yaml`, `pnpm-workspace.yaml`, `.dev.vars`, `.dev.vars.example`, `.github/workflows/deploy-dev.yml`, `.github/workflows/deploy-production.yml`, `.github/workflows/README.md`, `dist/`, `test-results/`.
@@ -3179,6 +3180,8 @@ curl -fsS localhost:3000/healthz; echo
 curl -fsS localhost:3000/readyz; echo
 curl -fsS localhost:3000/ | grep -o '<title>Snarvei</title>'
 curl -fsS localhost:3000/ | grep -c 'assets/'      # the REAL SPA, not the placeholder
+asset=$(curl -fsS localhost:3000/ | grep -o '/assets/[^"]*\.js' | head -1)
+curl -fsSI "localhost:3000$asset" | grep -i 'cache-control: public, max-age=31536000, immutable'
 docker inspect --format '{{.State.Health.Status}}' smoke-app   # after ~15s: healthy
 docker rm -f smoke-app smoke-pg; docker network rm snarvei-smoke
 ```
@@ -3194,7 +3197,236 @@ git commit -m "feat(build): native artifacts, COPY-only distroless image, compos
 
 ---
 
-### Task 9: CI workflows and Dependabot
+### Task 9: Playwright end-to-end suite against the real image
+
+**Files:**
+- Create: `e2e/playwright.config.ts`, `e2e/tsconfig.json`, `e2e/smoke.spec.ts`, `scripts/e2e-stack.sh`
+- Modify: `package.json` (root: add `@playwright/test` devDependency and `test:e2e` script), `bun.lock`, `biome.json` (include `e2e/**`)
+
+**Interfaces:**
+- Consumes: `scripts/build-artifacts.sh` and the `Dockerfile` (Task 8); the running image's `/healthz`, `/readyz`, `/api/config`, `/robots.txt`, SPA fallback and headers (Tasks 5 to 7).
+- Produces: `bun run test:e2e` (after `bash scripts/e2e-stack.sh up`) and `scripts/e2e-stack.sh up|down`, which Task 10's `ci.yml` calls. Later phases add spec files to `e2e/` for sign-in, organizations, teams, invitations and links.
+
+- [ ] **Step 1: Write `scripts/e2e-stack.sh`**
+
+```bash
+#!/usr/bin/env bash
+# Starts (or tears down) the stack the Playwright suite runs against: a
+# throwaway Postgres and the REAL container image on port 3300.
+#
+#   bash scripts/e2e-stack.sh up      # builds snarvei:e2e if missing
+#   bash scripts/e2e-stack.sh down
+#
+# E2E_REBUILD=1 rebuilds the artifacts and the image (reusing stale binaries
+# ships an image without the change under test).
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+NET=snarvei-e2e
+PG=snarvei-e2e-pg
+APP=snarvei-e2e-app
+PORT="${E2E_PORT:-3300}"
+
+down() {
+  docker rm -f "$APP" "$PG" >/dev/null 2>&1 || true
+  docker network rm "$NET" >/dev/null 2>&1 || true
+  echo "e2e stack down"
+}
+
+case "${1:-up}" in
+  down) down; exit 0 ;;
+  up) ;;
+  *) echo "usage: e2e-stack.sh [up|down]"; exit 2 ;;
+esac
+
+if [ -z "$(docker images -q snarvei:e2e)" ] || [ "${E2E_REBUILD:-0}" = "1" ]; then
+  if [ "${E2E_REBUILD:-0}" = "1" ] || [ ! -e dist/server/linux/amd64/snarvei ]; then
+    bash scripts/build-artifacts.sh
+  fi
+  docker build -t snarvei:e2e .
+fi
+
+down >/dev/null
+docker network create "$NET" >/dev/null
+docker run -d --name "$PG" --network "$NET" \
+  -e POSTGRES_USER=snarvei -e POSTGRES_PASSWORD=snarvei -e POSTGRES_DB=snarvei \
+  postgres:17-alpine >/dev/null
+
+# TCP probe: initdb's first start accepts on the socket before TCP is up.
+for i in $(seq 1 30); do
+  docker exec "$PG" pg_isready -h 127.0.0.1 -U snarvei -d snarvei >/dev/null 2>&1 && break
+  sleep 1
+done
+
+docker run -d --name "$APP" --network "$NET" -p "$PORT":3000 \
+  -e DATABASE_URL=postgres://snarvei:snarvei@"$PG":5432/snarvei \
+  -e APP_URL=http://127.0.0.1:"$PORT" \
+  -e AUTH_SECRET=e2e-stack-secret-at-least-32-bytes-long \
+  -e STORAGE_DRIVER=fs -e STORAGE_FS_PATH=/data \
+  -e OPEN_SIGNUP=1 \
+  snarvei:e2e >/dev/null
+
+for i in $(seq 1 30); do
+  curl -fsS "http://127.0.0.1:$PORT/healthz" >/dev/null 2>&1 && break
+  sleep 1
+done
+curl -fsS "http://127.0.0.1:$PORT/readyz" | grep -q '"ok":true'
+echo "e2e stack up on http://127.0.0.1:$PORT"
+```
+
+Run: `chmod +x scripts/e2e-stack.sh`
+
+- [ ] **Step 2: Add Playwright to the root workspace**
+
+In the root `package.json` add `"@playwright/test": "^1.62.1"` to `devDependencies` and the script `"test:e2e": "playwright test -c e2e/playwright.config.ts"`. In `biome.json` add `"e2e/**"` to `files.includes`. Then:
+
+```bash
+bun install
+bunx playwright install chromium
+```
+
+(CI installs with `--with-deps`; locally, if system libraries are missing, `sudo bunx playwright install-deps chromium` once.)
+
+- [ ] **Step 3: Write `e2e/playwright.config.ts` and `e2e/tsconfig.json`**
+
+`playwright.config.ts`:
+
+```ts
+import { defineConfig, devices } from "@playwright/test";
+
+// Runs against the REAL image started by scripts/e2e-stack.sh (port 3300).
+// No webServer block: the stack is a container, started and stopped around
+// the run by the script (locally) or by ci.yml.
+export default defineConfig({
+  testDir: ".",
+  fullyParallel: false,
+  retries: process.env.CI ? 1 : 0,
+  reporter: process.env.CI ? [["list"], ["html", { open: "never", outputFolder: "playwright-report" }]] : "list",
+  outputDir: "test-results",
+  use: {
+    baseURL: process.env.E2E_BASE_URL ?? "http://127.0.0.1:3300",
+    trace: "on-first-retry",
+  },
+  projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
+});
+```
+
+`tsconfig.json`:
+
+```json
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": { "lib": ["ES2023", "DOM"], "types": ["node"] },
+  "include": ["."]
+}
+```
+
+- [ ] **Step 4: Write the failing suite `e2e/smoke.spec.ts`**
+
+These are the flows that exist after phase 1. Later phases append sign-in, organization, team, invitation and link specs.
+
+```ts
+import { expect, test } from "@playwright/test";
+
+const CSP =
+  "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'";
+
+test("landing page renders the product messaging and a sign-in button", async ({ page }) => {
+  const response = await page.goto("/");
+  expect(response?.status()).toBe(200);
+  await expect(page.getByText("Short links you can trust long after they are shared.")).toBeVisible();
+  await expect(page.getByTestId("sign-in-button")).toBeVisible();
+});
+
+test("SPA deep links are served by the fallback, not a 404", async ({ page }) => {
+  for (const path of ["/app", "/app/settings", "/reset-password", "/app/acme/links/abc"]) {
+    const response = await page.goto(path);
+    expect(response?.status(), path).toBe(200);
+    expect(response?.headers()["content-type"], path).toContain("text/html");
+    await expect(page.locator("#root")).toBeAttached();
+  }
+});
+
+test("SPA responses carry the security headers; probes do not", async ({ request }) => {
+  const spa = await request.get("/");
+  expect(spa.headers()["content-security-policy"]).toBe(CSP);
+  expect(spa.headers()["x-frame-options"]).toBe("DENY");
+  expect(spa.headers()["x-content-type-options"]).toBe("nosniff");
+  expect(spa.headers()["cache-control"]).toBe("no-cache");
+
+  const probe = await request.get("/healthz");
+  expect(probe.headers()["content-security-policy"]).toBeUndefined();
+  expect(probe.headers()["cache-control"]).toBe("no-store");
+});
+
+test("hashed assets are immutable", async ({ request }) => {
+  const html = await (await request.get("/")).text();
+  const asset = html.match(/\/assets\/[^"']+\.js/)?.[0];
+  expect(asset, "index.html references a hashed bundle").toBeTruthy();
+  const response = await request.get(asset as string);
+  expect(response.status()).toBe(200);
+  expect(response.headers()["cache-control"]).toBe("public, max-age=31536000, immutable");
+});
+
+test("probes and public config answer JSON", async ({ request }) => {
+  const healthz = await request.get("/healthz");
+  expect(healthz.status()).toBe(200);
+  expect(await healthz.json()).toMatchObject({ ok: true, service: "snarvei" });
+  expect((await healthz.json()).version).toEqual(expect.any(String));
+
+  const readyz = await request.get("/readyz");
+  expect(readyz.status()).toBe(200);
+  expect(await readyz.json()).toEqual({ ok: true });
+
+  const config = await request.get("/api/config");
+  expect(config.status()).toBe(200);
+  expect(await config.json()).toEqual({ appName: "Snarvei", openSignup: true });
+});
+
+test("unknown server-owned paths answer a JSON 404", async ({ request }) => {
+  for (const path of ["/api/nope", "/l/does-not-exist", "/openapi.json", "/images/profile/x.png"]) {
+    const response = await request.get(path);
+    expect(response.status(), path).toBe(404);
+    expect(response.headers()["content-type"], path).toContain("application/json");
+    expect(await response.json(), path).toMatchObject({ code: "NOT_FOUND" });
+  }
+});
+
+test("robots.txt disallows crawling", async ({ request }) => {
+  const response = await request.get("/robots.txt");
+  expect(response.status()).toBe(200);
+  expect(await response.text()).toBe("User-agent: *\nDisallow: /\n");
+});
+```
+
+- [ ] **Step 5: Run the suite to verify it fails without the stack**
+
+Run: `bun run test:e2e`
+Expected: every test fails with a connection refused error on 127.0.0.1:3300 (no stack is up).
+
+- [ ] **Step 6: Bring the stack up and run the suite**
+
+```bash
+E2E_REBUILD=1 mise exec -- bash scripts/e2e-stack.sh up
+bun run test:e2e
+bash scripts/e2e-stack.sh down
+```
+
+Expected: `e2e stack up on http://127.0.0.1:3300`, then 7 passed. If the landing page test fails because the SPA errors on the `/api/auth/*` 404 (the client still uses the Better Auth client until phase 4), inspect the page with `trace: "on"` and report; the root element must still render.
+
+- [ ] **Step 7: Lint, typecheck, commit**
+
+```bash
+bun run check
+git add e2e scripts/e2e-stack.sh package.json bun.lock biome.json
+git commit -m "test(e2e): Playwright smoke suite against the real image"
+```
+
+(`bun run typecheck` covers `e2e/` only if the root `typecheck` script is extended: change it to `bun run --filter '*' typecheck && tsc --noEmit -p e2e`.)
+
+---
+
+### Task 10: CI workflows and Dependabot
 
 **Files:**
 - Create: `.github/workflows/test.yml`, `.github/workflows/ci.yml`, `.github/dependabot.yml`
@@ -3202,7 +3434,8 @@ git commit -m "feat(build): native artifacts, COPY-only distroless image, compos
 
 **Interfaces:**
 - Consumes: `.mise.toml`, `bun run check|test`, `go test`, `scripts/build-artifacts.sh`, `Dockerfile`.
-- Produces: the reusable `test.yml` that `release.yml` (phase 5) also calls; `ci.yml` pushes `ghcr.io/refsdal/snarvei:<next>-pr.<n>` previews.
+- Consumes: `scripts/e2e-stack.sh` and `bun run test:e2e` (Task 9).
+- Produces: the reusable `test.yml` that `release.yml` (phase 5) also calls; `ci.yml` runs the smoke test and the Playwright suite against the image, then pushes `ghcr.io/refsdal/snarvei:<next>-pr.<n>` previews.
 
 - [ ] **Step 1: Write `.github/workflows/test.yml`**
 
@@ -3270,7 +3503,8 @@ jobs:
 name: CI
 
 # The PR gate: the full suite, then the image built once from native
-# artifacts, smoke-tested, and pushed as a semver-prerelease preview.
+# artifacts, smoke-tested, driven through Playwright, and pushed as a
+# semver-prerelease preview.
 on:
   pull_request:
 
@@ -3378,6 +3612,29 @@ jobs:
           # The healthcheck subcommand runs from the shell-less image.
           docker exec app /app/snarvei healthcheck
 
+      # The Playwright suite drives the same smoke-tested image through a real
+      # browser, on the e2e stack's own port so the smoke containers can stay up.
+      - name: Install Playwright browser
+        run: bunx playwright install --with-deps chromium
+
+      - name: End-to-end tests against the image
+        run: |
+          docker tag snarvei:ci snarvei:e2e
+          bash scripts/e2e-stack.sh up
+          bun run test:e2e
+          bash scripts/e2e-stack.sh down
+
+      - name: Upload Playwright report and traces
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: playwright-artifacts-${{ github.run_id }}
+          path: |
+            e2e/playwright-report/
+            e2e/test-results/
+          if-no-files-found: ignore
+          retention-days: 7
+
       - name: Push preview image
         if: steps.gate.outputs.push == 'true'
         run: |
@@ -3436,7 +3693,7 @@ git commit -m "ci: reusable test workflow, PR image smoke test and preview push,
 
 ---
 
-### Task 10: Interim docs, full verification, pull request
+### Task 11: Interim docs, full verification, pull request
 
 **Files:**
 - Modify: `AGENTS.md` (prepend a banner), `README.md` (prepend a banner), `docs/runbook.md` (prepend a banner)
@@ -3465,6 +3722,7 @@ bun run test
 docker compose -f docker-compose.test.yml up -d --wait
 (cd apps/server && mise exec -- go vet ./... && mise exec -- go test -p 1 -count=1 ./...)
 mise exec -- bash scripts/build-artifacts.sh
+E2E_REBUILD=1 mise exec -- bash scripts/e2e-stack.sh up && bun run test:e2e; bash scripts/e2e-stack.sh down
 git status --short   # only intended changes; apps/server/internal/web/dist clean
 ```
 
@@ -3483,9 +3741,10 @@ Phase 1 of the Go migration (spec: docs/superpowers/specs/2026-09-04-go-backend-
 - Moves the SPA to apps/frontend on bun + biome, building to dist/client (still react-router; ported in phase 4).
 - New Go module apps/server: validated config, embedded goose migrations under an advisory lock, pgx pool, test rig, embedded-SPA handler with security headers, spec-first API (/healthz, /readyz, /api/config, JSON 404), entrypoint with migrate-then-serve / server / migrate / healthcheck modes.
 - COPY-only distroless image, native build scripts, compose files, .env.example.
-- CI: reusable test workflow (Go against Postgres, biome, bun test), PR image smoke test and ghcr.io preview push, Dependabot.
+- Playwright smoke suite (e2e/) against the real image: landing page, SPA fallback, headers, asset caching, probes, JSON 404, robots.
+- CI: reusable test workflow (Go against Postgres, biome, bun test), PR image smoke test, Playwright against the image, ghcr.io preview push, Dependabot.
 
-Not in this PR: auth, links, redirect (phases 2 and 3), the TanStack Router port (phase 4), Playwright, GoReleaser and release.yml (phase 5).
+Not in this PR: auth, links, redirect (phases 2 and 3), the TanStack Router port (phase 4), GoReleaser and release.yml (phase 5). Later phases extend e2e/ with sign-in, organization, team, invitation and link flows.
 
 🤖 Generated with [Claude Code](https://claude.com/claude-code)
 EOF
@@ -3494,14 +3753,14 @@ EOF
 - [ ] **Step 4: Watch CI**
 
 Run: `gh pr checks --watch`
-Expected: `Tests / tests` and `CI / image` both green, and the step summary names the pushed preview tag.
+Expected: `Tests / tests` and `CI / image` both green (the image job includes the Playwright run), and the step summary names the pushed preview tag.
 
 ---
 
 ## Self-review
 
-**Spec coverage (phase 1 items in section 11):** Workers removed (T1); LICENSE (T1); SPA on bun + biome to dist/client (T2); config (T3); pool + goose + 00001_init.sql (T4); web embed + placeholder (T5); /healthz, /readyz, /api/config with codegen (T6); dispatch + graceful shutdown (T7); Dockerfile, .dockerignore, data-skel, build scripts, compose, .mise.toml, .env.example (T3, T8); test.yml + ci.yml without e2e (T9); image boots, migrates and serves the old SPA (T8 step 5, T9 smoke test). Section 2's header set and cache rules (T5), section 8's variables and defaults (T3, T8), section 9's drift guards (T6).
+**Spec coverage (phase 1 items in section 11):** Workers removed (T1); LICENSE (T1); SPA on bun + biome to dist/client (T2); config (T3); pool + goose + 00001_init.sql (T4); web embed + placeholder (T5); /healthz, /readyz, /api/config with codegen (T6); dispatch + graceful shutdown (T7); Dockerfile, .dockerignore, data-skel, build scripts, compose, .mise.toml, .env.example (T3, T8); Playwright against the image (T9); test.yml + ci.yml with e2e (T10); image boots, migrates and serves the old SPA (T8 step 5, T10 smoke test). Section 2's header set and cache rules (T5), section 8's variables and defaults (T3, T8), section 9's drift guards (T6).
 
-**Deferred on purpose:** sqlc has no queries yet (`queries/.keep`, `sqlc.yaml` present); the `api-schema.d.ts` client and its drift guard arrive with phase 4; `/l/`, `/openapi.json`, `/scalar`, `/images/` answer the JSON 404 until phases 2 and 3.
+**Deferred on purpose:** sqlc has no queries yet (`queries/.keep`, `sqlc.yaml` present); the `api-schema.d.ts` client and its drift guard arrive with phase 4; Playwright flows for sign-in, organizations and links arrive with the phases that build them (the phase-1 suite covers what exists); `/l/`, `/openapi.json`, `/scalar`, `/images/` answer the JSON 404 until phases 2 and 3.
 
 **Type consistency:** `api.Deps{Pool, AppName, OpenSignup, Version}` is used identically in T6 tests, T6 composed test and T7. `db.ApplyMigrations(ctx, url, lockKey)` has three arguments everywhere (T4, T4 testrig, T7). `respond.Error(w, status, code, message)` has code before message in T6 (`api.go` and `respond.go`). `web.CSP` is exported and used by the T5 test. `config.Config` field names in T3 match their use in T7 (`MigrationLockKey`, `DisabledSubsystems`, `StorageDriver`).
