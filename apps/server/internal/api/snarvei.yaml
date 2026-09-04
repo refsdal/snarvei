@@ -1,0 +1,97 @@
+openapi: 3.0.3
+info:
+  title: Snarvei API
+  description: >-
+    Snarvei is an organization-aware URL shortener. This file is the single
+    source of truth for the server's HTTP surface (except /api/auth/*, which
+    Limen serves): it drives runtime request validation, the generated Go
+    strict server and the generated TypeScript client.
+  version: "1.0.0"
+servers:
+  - url: /
+paths:
+  /healthz:
+    get:
+      operationId: healthz
+      summary: Liveness probe. Touches nothing, not even the database pool.
+      tags: [system]
+      responses:
+        "200":
+          description: The process is alive.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, service, version]
+                properties:
+                  ok:
+                    type: boolean
+                    enum: [true]
+                  service:
+                    type: string
+                    enum: [snarvei]
+                  version:
+                    type: string
+  /readyz:
+    get:
+      operationId: readyz
+      summary: Readiness probe. Runs SELECT 1 against the database pool.
+      tags: [system]
+      responses:
+        "200":
+          description: Ready.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok]
+                properties:
+                  ok:
+                    type: boolean
+                    enum: [true]
+        "503":
+          description: The database is unreachable.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, error]
+                properties:
+                  ok:
+                    type: boolean
+                    enum: [false]
+                  error:
+                    type: string
+  /api/config:
+    get:
+      operationId: getConfig
+      summary: Public, unauthenticated deployment facts the SPA needs before sign-in.
+      tags: [system]
+      responses:
+        "200":
+          description: Deployment configuration.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PublicConfig"
+components:
+  schemas:
+    PublicConfig:
+      type: object
+      required: [appName, openSignup]
+      properties:
+        appName:
+          type: string
+        openSignup:
+          type: boolean
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        details:
+          type: object
+          additionalProperties: true
