@@ -114,6 +114,12 @@ jobs:
             -H 'content-type: application/json' -H 'origin: http://localhost:3000' \
             -d '{"credential":"nobody@example.invalid","password":"wrong-password"}')
           test "$status" = "401" || { echo "sign-in probe returned $status, expected 401"; exit 1; }
+          # The redirect answers plain-text 404 with no-store for unknown slugs,
+          # and the docs are public.
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:3000/l/does-not-exist)" = "404"
+          curl -sI http://localhost:3000/l/does-not-exist | grep -qi 'cache-control: no-store'
+          curl -fsS http://localhost:3000/openapi.json | grep -q '"/api/links"'
+          curl -fsSI http://localhost:3000/scalar | grep -qi 'content-security-policy'
           # The healthcheck subcommand runs from the shell-less image.
           docker exec app /app/snarvei healthcheck
 
