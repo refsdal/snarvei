@@ -13,6 +13,7 @@ import (
 	dbgen "github.com/refsdal/snarvei/server/internal/db/gen"
 	"github.com/refsdal/snarvei/server/internal/email"
 	"github.com/refsdal/snarvei/server/internal/ratelimit"
+	"github.com/refsdal/snarvei/server/internal/redirect"
 	"github.com/refsdal/snarvei/server/internal/storage"
 	"github.com/refsdal/snarvei/server/internal/testrig"
 )
@@ -51,6 +52,7 @@ func deps(t *testing.T, rig *testrig.Rig, appName string, openSignup bool, versi
 		Email:      email.NewRecording(),
 		RateLimit:  ratelimit.NewPostgres(q),
 		Hasher:     hasher,
+		Clicks:     redirect.NewRecorder(q, nil),
 		AppName:    appName,
 		OpenSignup: openSignup,
 		Version:    version,
@@ -111,7 +113,7 @@ func TestConfigIsPublic(t *testing.T) {
 
 func TestUnknownAPIPathIsJSON404(t *testing.T) {
 	h, _ := handler(t)
-	for _, p := range []string{"/api/nope", "/api", "/l/abc", "/openapi.json", "/scalar", "/images/profile/x"} {
+	for _, p := range []string{"/api/nope", "/api", "/images/profile/x"} {
 		rec, body := getJSON(t, h, p)
 		if rec.Code != 404 || body["code"] != "NOT_FOUND" {
 			t.Errorf("%s = %d %v, want 404 NOT_FOUND", p, rec.Code, body)

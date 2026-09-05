@@ -18,6 +18,15 @@ import (
 //go:embed all:dist
 var distFS embed.FS
 
+// scalarHTML is the static Scalar reference page served at GET /scalar; see
+// docs.go in the api package for the CSP that goes with it.
+//
+//go:embed scalar.html
+var scalarHTML []byte
+
+// ScalarHTML returns the embedded Scalar reference page.
+func ScalarHTML() []byte { return scalarHTML }
+
 // CSP is the Content-Security-Policy on every non-API response. 'unsafe-inline'
 // for styles is required by Emotion (MUI); data:/blob: images cover QR codes
 // and profile-image previews.
@@ -26,8 +35,8 @@ const CSP = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inl
 const robotsBody = "User-agent: *\nDisallow: /\n"
 
 // serverOwnedPrefixes and serverOwnedExact are handed to the API handler
-// without SPA headers. /l/, /openapi.json, /scalar and /images/ answer a JSON
-// 404 until the phase that implements them lands.
+// without SPA headers: /api/, /l/ and /images/ are real API routes, and
+// /openapi.json and /scalar are the API's own public docs routes.
 var serverOwnedPrefixes = []string{"/api/", "/l/", "/images/"}
 var serverOwnedExact = map[string]bool{"/api": true, "/healthz": true, "/readyz": true, "/openapi.json": true, "/scalar": true}
 
