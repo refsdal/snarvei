@@ -123,14 +123,19 @@ Two containers, nothing to build:
 ```sh
 curl -O https://raw.githubusercontent.com/refsdal/snarvei/main/docker-compose.selfhost.yml
 
-AUTH_SECRET=$(openssl rand -base64 32) \
-  docker compose -f docker-compose.selfhost.yml up -d
+printf 'AUTH_SECRET=%s\n' "$(openssl rand -base64 32)" > .env
+echo 'APP_URL=http://localhost:3000' >> .env
+
+docker compose -f docker-compose.selfhost.yml up -d
 ```
 
 This brings up Postgres and the app on <http://localhost:3000>, with profile
 images on a local volume (`STORAGE_DRIVER=fs`). The app migrates itself under
 a Postgres advisory lock before it starts serving, so there is no separate
-migration step to wait on.
+migration step to wait on. `.env` sits next to the compose file and Compose
+reads it automatically on every `up` — keep it around: generating a fresh
+`AUTH_SECRET` on a later run signs everyone out and, unless `IP_HASH_PEPPER`
+is also set, rotates every click-analytics IP hash.
 
 To create the first account, start the container once with `OPEN_SIGNUP=1`
 (the default), open <http://localhost:3000>, and use the "Create account"
@@ -364,9 +369,15 @@ mise run snapshot   # full GoReleaser dry run
 After editing `openapi/snarvei.yaml`, run `go generate ./...` from
 `apps/server` (regenerates the strict server, types and the embedded spec
 copy) and `bun run gen:client` from the root (regenerates
-`apps/frontend/src/lib/api-schema.d.ts`). Both outputs are committed; a Go
-test and a bun test each regenerate into a temp directory and diff against
-the committed files, so drift fails the suite rather than shipping silently.
+`apps/frontend/src/lib/api-schema.d.ts`). Both outputs are committed. On the
+Go side, `go test` catches drift itself: `internal/api`'s
+`TestGeneratedCodeIsUpToDate` and `TestEmbeddedSpecMatchesRepoRoot`, and
+`internal/db`'s `TestSqlcOutputIsUpToDate`, each regenerate into a temp
+directory and diff against the committed files. There is no equivalent bun
+test for `api-schema.d.ts`; its drift guard is CI's "Generated API client is
+current" step (`.github/workflows/test.yml`), which runs `bun run gen:client`
+and `git diff --exit-code`. Locally, run `bun run gen:client` and check
+`git diff` yourself before committing.
 
 ## API and Scalar
 
@@ -423,13 +434,14 @@ with plain `curl`, runs the Playwright suite against it, and — for PRs from
 this repository — pushes it as a preview image tagged
 `<next-version>-pr.<number>`.
 
-Every push to `main` re-runs `test.yml` on the merge commit, then
-`release.yml` computes the next version with svu; when there is nothing
-releasable the run ends green, otherwise it tags, runs
-`goreleaser release`, and deletes the tag again if publishing fails. Nothing
-in the pipeline rolls anything out — deployment (`snarvei migrate` or the
-default mode, then pointing the running deployment at the new tag) is the
-operator's.
+Every push to `main` runs `release.yml`, which computes the next version
+with svu first; when it is releasable (or a manual dry run), it re-runs
+`test.yml` on the merge commit as its `verify` gate, and only then tags,
+runs `goreleaser release`, and deletes the tag again if publishing fails.
+When there is nothing releasable, the run ends green without re-running the
+suite or publishing anything. Nothing in the pipeline rolls anything out —
+deployment (`snarvei migrate` or the default mode, then pointing the running
+deployment at the new tag) is the operator's.
 
 ## License
 

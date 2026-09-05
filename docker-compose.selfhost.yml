@@ -1,5 +1,11 @@
-# Snarvei, self-hosted, from the published image:
-#   AUTH_SECRET=$(openssl rand -base64 32) docker compose -f docker-compose.selfhost.yml up -d
+# Snarvei, self-hosted, from the published image. Generate a persistent
+# .env once (Compose reads it automatically), then bring it up:
+#   printf 'AUTH_SECRET=%s\n' "$(openssl rand -base64 32)" > .env
+#   echo 'APP_URL=http://localhost:3000' >> .env
+#   docker compose -f docker-compose.selfhost.yml up -d
+# Re-running the openssl one-liner without persisting it mints a new
+# AUTH_SECRET on every `up`, signing everyone out and rotating every
+# click-analytics IP hash (unless IP_HASH_PEPPER is also set).
 # Postgres for the data, a local volume for profile images (STORAGE_DRIVER=fs),
 # and the app in default mode: it migrates itself under an advisory lock at
 # startup, then serves. BACK UP BOTH VOLUMES.

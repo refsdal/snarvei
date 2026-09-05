@@ -14,7 +14,11 @@ Thanks for considering it. Reading this first will save you a rejected PR.
 - **Generated code is committed.** After touching `openapi/snarvei.yaml` or
   `apps/server/internal/db/queries/*.sql`, run `go generate ./...` (from
   `apps/server`) and `bun run gen:client` (from the root), and commit the
-  output — a drift-guard test fails otherwise.
+  output. Drift in the Go-generated code (`internal/api/gen`, the embedded
+  spec, `internal/db/gen`) fails `go test`. Drift in the generated client
+  (`apps/frontend/src/lib/api-schema.d.ts`) has no local test — it is only
+  caught by CI's "Generated API client is current" step — so run
+  `bun run gen:client` and check `git diff` yourself before committing.
 
 ## Getting set up
 
@@ -56,6 +60,22 @@ takes, so it is the path that stays tested.
 - `APP_URL` must be exactly the origin the browser uses
   (`http://localhost:5173` in the dev loop above, not `127.0.0.1`) — Limen
   rejects non-GET auth requests whose `Origin` header does not match it.
+
+## Pins bumped by hand
+
+Dependabot covers GitHub Actions, the Go module, the bun workspace and the
+Dockerfile base images. It does not cover:
+
+- The tool versions in `.mise.toml`: `go`, `bun`, `sqlc`, `oapi-codegen`,
+  `goose`, `goreleaser`, `svu`, `cosign`, `syft`.
+- `openapi-typescript@7.13.0`, pinned inline in the root `package.json`
+  `gen:client` script rather than as a `package.json` dependency.
+- `@scalar/api-reference@1.67.0` in
+  `apps/server/internal/web/scalar.html`, pinned by URL with a Subresource
+  Integrity hash (the file's own comment explains how to recompute it).
+
+Bump these by hand when a new version is worth taking; nothing will remind
+you otherwise.
 
 ## Pull requests
 

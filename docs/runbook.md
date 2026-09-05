@@ -14,7 +14,9 @@ operator already has. There is no separate worker, cron or landing mode —
 Snarvei has no scheduled work.
 
 - `GET /healthz` — liveness. Constructs nothing, touches nothing (a slow
-  database must never turn into a restart loop). `200 {"ok":true,"service":"snarvei","version":"<tag>"}`.
+  database must never turn into a restart loop). `200
+  {"ok":true,"service":"snarvei","version":"<tag>"}` — `version` is the
+  image tag (`0.1.0`, no `v`; the git tag is `v0.1.0`).
 - `GET /readyz` — readiness. Runs `SELECT 1` against Postgres. `200
   {"ok":true}` or `503 {"ok":false,"error":"..."}`. Both probes send
   `Cache-Control: no-store`.
@@ -52,8 +54,9 @@ rotation if stable hashes across a secret rotation matter to you.
    curl -s https://<host>/healthz   # {"ok":true,"service":"snarvei","version":"<tag>"}
    ```
 
-   Confirm `version` matches the tag just deployed. Open `/scalar` and
-   confirm the API reference loads. Follow a real short link
+   Confirm `version` matches the image tag just deployed (`main.version` is
+   the image tag, e.g. `0.1.0`, no `v` — the git tag is `v0.1.0`). Open
+   `/scalar` and confirm the API reference loads. Follow a real short link
    (`/l/<slug>`) and confirm a `302` (or the link's configured status) with
    `Cache-Control: no-store`.
 
@@ -71,6 +74,10 @@ rotation if stable hashes across a secret rotation matter to you.
   bucket). Back it up alongside Postgres — restoring one without the other
   leaves profile images pointing at files that no longer exist, or a
   database with no matching images.
+- If a release fails after the image has already been pushed to ghcr.io,
+  the git tag and GitHub Release are deleted, but the image tags
+  (`0.1.0`, `0.1`, `0`, `latest`, `sha-<commit>`) are not un-pushed — they
+  stay on ghcr.io until the next successful release overwrites them.
 
 ## Common failures
 

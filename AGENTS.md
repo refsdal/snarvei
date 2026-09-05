@@ -91,10 +91,15 @@ cd apps/server && go generate ./...   # oapi-codegen: strict server + types; cop
 bun run gen:client                    # openapi-typescript: apps/frontend/src/lib/api-schema.d.ts
 ```
 
-Both outputs are committed and never produced in CI or in the image. A Go
-test regenerates into a temp directory and diffs it against the committed
-`internal/api/gen` output (and the embedded spec copy); a bun test does the
-same for `api-schema.d.ts`. Drift fails the suite.
+Both outputs are committed and never produced in CI or in the image. On the
+Go side, `TestGeneratedCodeIsUpToDate` and `TestEmbeddedSpecMatchesRepoRoot`
+(`internal/api`) regenerate into a temp directory and diff it against the
+committed `internal/api/gen` output and the embedded spec copy; drift fails
+`go test`. There is no equivalent bun test for `api-schema.d.ts` — its drift
+guard is the "Generated API client is current" step in
+`.github/workflows/test.yml` (`bun run gen:client` then `git diff
+--exit-code`), so client drift is only caught in CI, not by `bun run test`
+or `bun run check` locally.
 
 Every spec operation must also appear in `operationTiers`
 (`apps/server/internal/api/tiers.go`), which names the middleware chain
@@ -172,13 +177,18 @@ recorder; a click can be lost on a hard kill, which matches the previous
   `internal/testrig` applies migrations once per run and truncates between
   tests.
 - Frontend: `bun run test` for route helpers and pure logic; `bun run check`
-  for biome + `tsc --noEmit` + the `api-schema.d.ts` drift guard.
+  for biome + `tsc --noEmit` (client drift is a CI-only check — see
+  "Spec-First Workflow" above, not part of `bun run check`).
 - Playwright (`e2e/`, `mise run e2e` or `bun run test:e2e`): runs against the
   real container image via `scripts/e2e-stack.sh`, with `OPEN_SIGNUP=1` and
   no `SMTP_*` configured, so mail is captured in memory and read back
   through `GET /api/_test/mail` (`DELETE` clears it) — enabled by
   `E2E_TEST_HOOKS=1`, refused unless `APP_URL` is a loopback origin, never
-  turn this on anywhere real.
+  turn this on anywhere real. Mailbox discipline: no spec ever calls
+  `DELETE` on it — files run in parallel workers against one shared mailbox,
+  so clearing it would race other tests. Every read goes through
+  `lastMailTo(request, email)` (`e2e/support.ts`), which polls and picks the
+  newest message to that recipient instead of assuming index 0.
 
 Run the commands that cover what changed before committing; do not rely on
 CI to catch an avoidable regression.

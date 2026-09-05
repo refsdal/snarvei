@@ -35,7 +35,7 @@ test("a member sees only their team's links, and an admin can add them to anothe
   await page.goto(link!);
   await expect(page.getByTestId("invitation-organization")).toHaveText("Acme");
   await page.getByTestId("invitation-accept-button").click();
-  await page.waitForURL(/\/app(\?|$|\/)/);
+  await page.waitForURL(/\/app(\?|$)/);
   await page.getByRole("button", { name: "Open workspace" }).click();
   await page.waitForURL(`**/app/${ws.slug}/dashboard`);
   await expect(page.getByTestId("dashboard-links-count")).toHaveText("1");
