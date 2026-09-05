@@ -1,6 +1,8 @@
 import KeyOutlinedIcon from "@mui/icons-material/KeyOutlined";
 import { Button, Stack, TextField } from "@mui/material";
-import { authClient } from "../../../lib/legacy-auth-client";
+import { password } from "../../../lib/auth-client";
+import { keys } from "../../../lib/data";
+import { queryClient } from "../../../lib/query";
 import { SectionCard } from "./section-card";
 import type { SharedSectionProps } from "./types";
 
@@ -8,7 +10,6 @@ export function PasswordSection(
   props: SharedSectionProps & {
     currentPassword: string;
     newPassword: string;
-    loadSessions: () => Promise<void>;
     setCurrentPassword: (value: string) => void;
     setNewPassword: (value: string) => void;
   },
@@ -40,19 +41,11 @@ export function PasswordSection(
           disabled={!props.currentPassword || !props.newPassword || props.busyAction === "change-password"}
           onClick={() =>
             void props.runAction("change-password", async () => {
-              const result = await authClient.changePassword({
-                currentPassword: props.currentPassword,
-                newPassword: props.newPassword,
-                revokeOtherSessions: true,
-              });
-              if (result.error) {
-                props.setMessage({ severity: "error", text: result.error.message ?? "Unable to change password." });
-                return;
-              }
+              await password.change(props.currentPassword, props.newPassword);
               props.setCurrentPassword("");
               props.setNewPassword("");
-              await props.loadSessions();
-              props.setMessage({ severity: "success", text: "Password updated. Other active sessions were revoked." });
+              await queryClient.invalidateQueries({ queryKey: keys.sessions });
+              props.setMessage({ severity: "success", text: "Password updated. Other sessions were signed out." });
             })
           }
         >

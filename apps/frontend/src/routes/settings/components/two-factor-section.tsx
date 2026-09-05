@@ -1,25 +1,26 @@
 import ShieldOutlinedIcon from "@mui/icons-material/ShieldOutlined";
 import { Box, Button, Chip, Stack, TextField, Typography } from "@mui/material";
 import QRCode from "react-qr-code";
-import { authClient } from "../../../lib/legacy-auth-client";
-import type { SessionData } from "../../../types";
+import { twoFactor } from "../../../lib/auth-client";
+import { keys } from "../../../lib/data";
+import { queryClient } from "../../../lib/query";
 import { SectionCard } from "./section-card";
 import type { SharedSectionProps } from "./types";
 
 export function TwoFactorSection(
   props: SharedSectionProps & {
-    session: SessionData;
     twoFactorPassword: string;
     twoFactorCode: string;
     totpUri: string | null;
     backupCodes: string[];
-    loadSessions: () => Promise<void>;
     setBackupCodes: (codes: string[]) => void;
     setTotpUri: (value: string | null) => void;
     setTwoFactorCode: (value: string) => void;
     setTwoFactorPassword: (value: string) => void;
   },
 ) {
+  const enabled = props.me.user.twoFactorEnabled;
+
   return (
     <SectionCard
       title="Two-factor authentication"
@@ -28,12 +29,9 @@ export function TwoFactorSection(
     >
       <Stack spacing={2.5}>
         <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5} sx={{ alignItems: { sm: "center" } }}>
-          <Chip
-            label={props.session.user.twoFactorEnabled ? "Enabled" : "Not enabled"}
-            color={props.session.user.twoFactorEnabled ? "success" : "default"}
-          />
+          <Chip label={enabled ? "Enabled" : "Not enabled"} color={enabled ? "success" : "default"} />
           <Typography color="text.secondary">
-            {props.session.user.twoFactorEnabled
+            {enabled
               ? "Use an authenticator app or backup codes to protect sign-in."
               : "Enable TOTP to require a second factor after password sign-in."}
           </Typography>
@@ -45,25 +43,18 @@ export function TwoFactorSection(
           value={props.twoFactorPassword}
           onChange={(event) => props.setTwoFactorPassword(event.target.value)}
           helperText="Required for credential accounts."
+          slotProps={{ htmlInput: { "data-testid": "settings-2fa-password-input" } }}
         />
 
-        {!props.session.user.twoFactorEnabled ? (
+        {!enabled ? (
           <Button
             variant="contained"
             sx={{ alignSelf: "flex-start" }}
-            disabled={props.busyAction === "enable-2fa"}
+            disabled={!props.twoFactorPassword || props.busyAction === "enable-2fa"}
             onClick={() =>
               void props.runAction("enable-2fa", async () => {
-                const result = await authClient.twoFactor.enable({ password: props.twoFactorPassword || undefined });
-                if (result.error) {
-                  props.setMessage({
-                    severity: "error",
-                    text: result.error.message ?? "Unable to enable two-factor authentication.",
-                  });
-                  return;
-                }
-                props.setTotpUri(result.data?.totpURI ?? null);
-                props.setBackupCodes(result.data?.backupCodes ?? []);
+                const { uri } = await twoFactor.initiateSetup(props.twoFactorPassword);
+                props.setTotpUri(uri);
                 props.setMessage({
                   severity: "info",
                   text: "Scan the QR code and verify one authenticator code to finish enabling 2FA.",
@@ -80,36 +71,20 @@ export function TwoFactorSection(
               disabled={props.busyAction === "view-backup-codes"}
               onClick={() =>
                 void props.runAction("view-backup-codes", async () => {
-                  const result = await authClient.twoFactor.viewBackupCodes({});
-                  if (result.error) {
-                    props.setMessage({
-                      severity: "error",
-                      text: result.error.message ?? "Unable to view backup codes.",
-                    });
-                    return;
-                  }
-                  props.setBackupCodes(result.data?.backupCodes ?? []);
+                  const codes = await twoFactor.getBackupCodes();
+                  props.setBackupCodes(codes);
                 })
               }
             >
-              View backup codes
+              Show backup codes
             </Button>
             <Button
               variant="outlined"
               disabled={props.busyAction === "generate-backup-codes"}
               onClick={() =>
                 void props.runAction("generate-backup-codes", async () => {
-                  const result = await authClient.twoFactor.generateBackupCodes({
-                    password: props.twoFactorPassword || undefined,
-                  });
-                  if (result.error) {
-                    props.setMessage({
-                      severity: "error",
-                      text: result.error.message ?? "Unable to regenerate backup codes.",
-                    });
-                    return;
-                  }
-                  props.setBackupCodes(result.data?.backupCodes ?? []);
+                  const codes = await twoFactor.regenerateBackupCodes();
+                  props.setBackupCodes(codes);
                   props.setMessage({ severity: "success", text: "Backup codes regenerated." });
                 })
               }
@@ -118,21 +93,15 @@ export function TwoFactorSection(
             </Button>
             <Button
               color="inherit"
-              disabled={props.busyAction === "disable-2fa"}
+              disabled={!props.twoFactorPassword || props.busyAction === "disable-2fa"}
               onClick={() =>
                 void props.runAction("disable-2fa", async () => {
-                  const result = await authClient.twoFactor.disable({ password: props.twoFactorPassword || undefined });
-                  if (result.error) {
-                    props.setMessage({
-                      severity: "error",
-                      text: result.error.message ?? "Unable to disable two-factor authentication.",
-                    });
-                    return;
-                  }
+                  await twoFactor.disable(props.twoFactorPassword);
                   props.setTotpUri(null);
                   props.setBackupCodes([]);
                   props.setTwoFactorCode("");
-                  await props.refreshSessionState();
+                  props.setTwoFactorPassword("");
+                  await queryClient.invalidateQueries({ queryKey: keys.me });
                   props.setMessage({ severity: "success", text: "Two-factor authentication disabled." });
                 })
               }
@@ -151,6 +120,14 @@ export function TwoFactorSection(
               <Typography color="text.secondary">
                 Scan this QR code with your authenticator app, then verify the current code below.
               </Typography>
+              <Typography
+                variant="body2"
+                color="text.secondary"
+                data-testid="settings-2fa-uri"
+                sx={{ wordBreak: "break-all", fontFamily: "ui-monospace, SFMono-Regular, monospace" }}
+              >
+                {props.totpUri}
+              </Typography>
               <TextField
                 label="Authenticator code"
                 value={props.twoFactorCode}
@@ -163,17 +140,13 @@ export function TwoFactorSection(
                 disabled={!props.twoFactorCode || props.busyAction === "verify-2fa"}
                 onClick={() =>
                   void props.runAction("verify-2fa", async () => {
-                    const result = await authClient.twoFactor.verifyTotp({ code: props.twoFactorCode });
-                    if (result.error) {
-                      props.setMessage({
-                        severity: "error",
-                        text: result.error.message ?? "Unable to verify authenticator code.",
-                      });
-                      return;
-                    }
+                    await twoFactor.finalizeSetup(props.twoFactorCode);
+                    const codes = await twoFactor.getBackupCodes();
                     props.setTwoFactorCode("");
-                    await props.refreshSessionState();
-                    await props.loadSessions();
+                    props.setTwoFactorPassword("");
+                    props.setTotpUri(null);
+                    props.setBackupCodes(codes);
+                    await queryClient.invalidateQueries({ queryKey: keys.me });
                     props.setMessage({ severity: "success", text: "Two-factor authentication enabled." });
                   })
                 }

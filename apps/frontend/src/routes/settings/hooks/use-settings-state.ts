@@ -1,36 +1,18 @@
-import { useCallback, useEffect, useState } from "react";
-import { authClient } from "../../../lib/legacy-auth-client";
-import type { AppMessage, AuthSession, PasskeySummary, SessionData } from "../../../types";
+import { useState } from "react";
+import type { AppMessage } from "../../../components/message-context";
+import { errorMessage } from "../../../lib/api";
+import type { Me } from "../../../lib/data";
+import type { ActionRunner } from "../components/types";
 
-type LoadResult<T> = { items: T[]; error: string | null };
-
-const fetchSessions = async (): Promise<LoadResult<AuthSession>> => {
-  const result = await authClient.listSessions();
-  if (result.error) {
-    return { items: [], error: result.error.message ?? "Unable to load active sessions." };
-  }
-  return { items: result.data ?? [], error: null };
-};
-
-const fetchPasskeys = async (): Promise<LoadResult<PasskeySummary>> => {
-  const result = await authClient.passkey.listUserPasskeys({});
-  if (result.error) {
-    return { items: [], error: result.error.message ?? "Unable to load passkeys." };
-  }
-  return { items: result.data ?? [], error: null };
-};
-
-export function useSettingsState(options: { session: SessionData | null; setMessage: (message: AppMessage) => void }) {
-  const sessionUserName = options.session?.user.name ?? "";
-  const userId = options.session?.user.id ?? null;
-  const { setMessage } = options;
-  const [profileName, setProfileName] = useState(sessionUserName);
-  // Keep the editable name in sync with the session without an effect
+export function useSettingsState(options: { me: Me; setMessage: (message: AppMessage) => void }) {
+  const { me, setMessage } = options;
+  const [profileName, setProfileName] = useState(me.user.name);
+  // Keep the editable name in sync with the loaded user without an effect
   // (React "adjusting state during render" pattern).
-  const [syncedUserName, setSyncedUserName] = useState(sessionUserName);
-  if (syncedUserName !== sessionUserName) {
-    setSyncedUserName(sessionUserName);
-    setProfileName(sessionUserName);
+  const [syncedUserName, setSyncedUserName] = useState(me.user.name);
+  if (syncedUserName !== me.user.name) {
+    setSyncedUserName(me.user.name);
+    setProfileName(me.user.name);
   }
   const [newEmail, setNewEmail] = useState("");
   const [currentPassword, setCurrentPassword] = useState("");
@@ -39,78 +21,14 @@ export function useSettingsState(options: { session: SessionData | null; setMess
   const [twoFactorCode, setTwoFactorCode] = useState("");
   const [totpUri, setTotpUri] = useState<string | null>(null);
   const [backupCodes, setBackupCodes] = useState<string[]>([]);
-  // Loaded collections are tagged with the user they were loaded for so that
-  // "loading" can be derived (no setState in effects) and data never leaks
-  // across a user switch.
-  const [sessionsState, setSessionsState] = useState<{ userId: string; items: AuthSession[] } | null>(null);
-  const [passkeysState, setPasskeysState] = useState<{ userId: string; items: PasskeySummary[] } | null>(null);
-  const [newPasskeyName, setNewPasskeyName] = useState("");
-  const [editingPasskeyId, setEditingPasskeyId] = useState<string | null>(null);
-  const [editingPasskeyName, setEditingPasskeyName] = useState("");
   const [busyAction, setBusyAction] = useState<string | null>(null);
 
-  const applySessions = useCallback(
-    (forUserId: string, result: Awaited<ReturnType<typeof fetchSessions>>) => {
-      if (result.error) {
-        setMessage({ severity: "error", text: result.error });
-      }
-      setSessionsState({ userId: forUserId, items: result.items });
-    },
-    [setMessage],
-  );
-
-  const applyPasskeys = useCallback(
-    (forUserId: string, result: Awaited<ReturnType<typeof fetchPasskeys>>) => {
-      if (result.error) {
-        setMessage({ severity: "error", text: result.error });
-      }
-      setPasskeysState({ userId: forUserId, items: result.items });
-    },
-    [setMessage],
-  );
-
-  const loadSessions = useCallback(async () => {
-    if (!userId) {
-      return;
-    }
-    applySessions(userId, await fetchSessions());
-  }, [applySessions, userId]);
-
-  const loadPasskeys = useCallback(async () => {
-    if (!userId) {
-      return;
-    }
-    applyPasskeys(userId, await fetchPasskeys());
-  }, [applyPasskeys, userId]);
-
-  useEffect(() => {
-    if (!userId) {
-      return;
-    }
-
-    let cancelled = false;
-    void Promise.all([fetchSessions(), fetchPasskeys()]).then(([sessionsResult, passkeysResult]) => {
-      if (cancelled) {
-        return;
-      }
-      applySessions(userId, sessionsResult);
-      applyPasskeys(userId, passkeysResult);
-    });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [applyPasskeys, applySessions, userId]);
-
-  const sessions = sessionsState?.userId === userId ? sessionsState.items : [];
-  const sessionsLoading = userId !== null && sessionsState?.userId !== userId;
-  const passkeys = passkeysState?.userId === userId ? passkeysState.items : [];
-  const passkeysLoading = userId !== null && passkeysState?.userId !== userId;
-
-  const runAction = async (action: string, work: () => Promise<void>) => {
+  const runAction: ActionRunner = async (action, work) => {
     setBusyAction(action);
     try {
       await work();
+    } catch (err) {
+      setMessage({ severity: "error", text: errorMessage(err, "Something went wrong.") });
     } finally {
       setBusyAction(null);
     }
@@ -120,25 +38,13 @@ export function useSettingsState(options: { session: SessionData | null; setMess
     backupCodes,
     busyAction,
     currentPassword,
-    editingPasskeyId,
-    editingPasskeyName,
-    loadPasskeys,
-    loadSessions,
     newEmail,
     newPassword,
-    newPasskeyName,
-    passkeys,
-    passkeysLoading,
     profileName,
     runAction,
-    sessions,
-    sessionsLoading,
     setBackupCodes,
     setCurrentPassword,
-    setEditingPasskeyId,
-    setEditingPasskeyName,
     setNewEmail,
-    setNewPasskeyName,
     setNewPassword,
     setProfileName,
     setTotpUri,
