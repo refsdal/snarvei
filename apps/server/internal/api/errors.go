@@ -40,6 +40,8 @@ func classify(err error) error {
 		return fail(http.StatusConflict, "EMAIL_TAKEN", "An account already exists for that email")
 	case errors.Is(err, auth.ErrSlugTaken):
 		return fail(http.StatusConflict, "SLUG_TAKEN", "That slug is already in use")
+	case errors.Is(err, auth.ErrInvalidSlug):
+		return fail(http.StatusBadRequest, "VALIDATION_FAILED", "Invalid slug")
 	case errors.Is(err, auth.ErrNotMember), errors.Is(err, auth.ErrForbidden):
 		return fail(http.StatusForbidden, "FORBIDDEN", "Access denied")
 	case errors.Is(err, auth.ErrAlreadyMember):

@@ -111,7 +111,7 @@ func (q *Queries) GetAuthSession(ctx context.Context, arg GetAuthSessionParams) 
 }
 
 const getInvitationToken = `-- name: GetInvitationToken :one
-SELECT "token", "organization_id", "email", "status" FROM "organization_invitations" WHERE "id" = $1
+SELECT "token", "organization_id", "email", "status", "expires_at" FROM "organization_invitations" WHERE "id" = $1
 `
 
 type GetInvitationTokenRow struct {
@@ -119,6 +119,7 @@ type GetInvitationTokenRow struct {
 	OrganizationID string
 	Email          string
 	Status         string
+	ExpiresAt      pgtype.Timestamptz
 }
 
 func (q *Queries) GetInvitationToken(ctx context.Context, id string) (GetInvitationTokenRow, error) {
@@ -129,6 +130,7 @@ func (q *Queries) GetInvitationToken(ctx context.Context, id string) (GetInvitat
 		&i.OrganizationID,
 		&i.Email,
 		&i.Status,
+		&i.ExpiresAt,
 	)
 	return i, err
 }

@@ -1,7 +1,9 @@
 -- name: GetInvitation :one
--- The public view plus everything accept/register need. inviter/team joins
--- are LEFT so a deleted inviter or team never hides the invitation.
-SELECT i."id", i."organization_id", i."email", COALESCE(i."roles", '') AS roles, i."status", i."token",
+-- The public view plus everything accept/register need. The inviter join is
+-- LEFT because "inviter_id" is nullable; the team join is LEFT so a deleted
+-- team never hides the invitation. "organization_invitations.inviter_id" is
+-- ON DELETE CASCADE, so deleting an admin removes their pending invitations.
+SELECT i."id", i."organization_id", i."email", COALESCE(i."roles", '') AS roles, i."status",
     i."expires_at", i."created_at",
     o."name" AS organization_name, o."slug" AS organization_slug,
     COALESCE(u."name", '') AS inviter_name,
@@ -20,6 +22,7 @@ FROM "organization_invitations" i
 LEFT JOIN "invitation_teams" it ON it."invitation_id" = i."id"
 LEFT JOIN "teams" t ON t."id" = it."team_id"
 WHERE i."organization_id" = $1 AND i."status" = 'pending'
+    AND (i."expires_at" IS NULL OR i."expires_at" > now())
 ORDER BY i."created_at" DESC;
 
 -- name: SetInvitationTeam :exec

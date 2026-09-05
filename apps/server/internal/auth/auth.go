@@ -347,6 +347,9 @@ func (s *service) respond(ctx context.Context, userID, invitationID string, resp
 	if row.Status != string(organization.InvitationStatusPending) {
 		return nil, ErrInvitationInvalid
 	}
+	if row.ExpiresAt.Valid && row.ExpiresAt.Time.Before(time.Now()) {
+		return nil, ErrInvitationInvalid
+	}
 	inv, err := s.org.RespondToInvitation(ctx, user, row.Token, response)
 	if err != nil {
 		return nil, mapError("respond to invitation", err)
@@ -429,8 +432,10 @@ func mapError(op string, err error) error {
 		return &PasswordPolicyError{Requirement: "must contain an uppercase letter"}
 	case errors.Is(err, credentialpassword.ErrPasswordRequiresNumbers):
 		return &PasswordPolicyError{Requirement: "must contain a number"}
-	case errors.Is(err, organization.ErrOrganizationSlugAlreadyExists), errors.Is(err, organization.ErrInvalidSlug):
+	case errors.Is(err, organization.ErrOrganizationSlugAlreadyExists):
 		return ErrSlugTaken
+	case errors.Is(err, organization.ErrInvalidSlug):
+		return ErrInvalidSlug
 	case errors.Is(err, organization.ErrUserAlreadyInOrganization), errors.Is(err, organization.ErrMemberAlreadyExists):
 		return ErrAlreadyMember
 	case errors.Is(err, organization.ErrInvitationAlreadyExists):

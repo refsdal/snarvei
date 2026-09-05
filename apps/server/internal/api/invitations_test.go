@@ -146,6 +146,45 @@ func ownerIDOf(t *testing.T, a *testrig.AppRig, email string) string {
 	return id
 }
 
+// TestExpiredInvitationIsConsistentlyRejected covers finding 1: every path
+// that reads a pending-but-expired invitation must treat it as expired, not
+// as pending (GetInvitation), not-found (accept/reject, via GetInvitationToken),
+// or silently listed (ListPendingInvitations).
+func TestExpiredInvitationIsConsistentlyRejected(t *testing.T) {
+	a := testrig.App(t)
+	orgID, owner := a.NewOrg("Acme", "acme", "owner@example.com")
+	a.SignUp("Existing", "existing@example.com")
+	existing := a.SignIn("existing@example.com")
+
+	inv := a.Do(http.MethodPost, "/api/organizations/"+orgID+"/invitations", map[string]string{"email": "existing@example.com", "role": "member"}, owner)
+	if inv.Code != 201 {
+		t.Fatalf("invite: %d %s", inv.Code, inv.Body)
+	}
+	invID := inv.JSON["id"].(string)
+
+	if _, err := a.Rig.Pool.Exec(context.Background(),
+		`UPDATE organization_invitations SET expires_at = now() - interval '1 hour' WHERE id = $1`, invID,
+	); err != nil {
+		t.Fatalf("expire invitation: %v", err)
+	}
+
+	if pub := a.Do(http.MethodGet, "/api/invitations/"+invID, nil, ""); pub.Code != 200 || pub.JSON["status"] != "expired" {
+		t.Fatalf("public view must report expired: %d %s", pub.Code, pub.Body)
+	}
+
+	if resp := a.Do(http.MethodPost, "/api/invitations/"+invID+"/accept", nil, existing); resp.Code != 410 || resp.JSON["code"] != "INVITATION_INVALID" {
+		t.Fatalf("accept expired: %d %s", resp.Code, resp.Body)
+	}
+
+	if resp := a.Do(http.MethodPost, "/api/invitations/"+invID+"/register", map[string]string{"name": "New Person", "password": testrig.Password}, ""); resp.Code != 410 || resp.JSON["code"] != "INVITATION_INVALID" {
+		t.Fatalf("register with expired: %d %s", resp.Code, resp.Body)
+	}
+
+	if list := a.Do(http.MethodGet, "/api/organizations/"+orgID+"/invitations", nil, owner); len(list.Array) != 0 {
+		t.Fatalf("expired invitation must not appear in the pending list: %s", list.Body)
+	}
+}
+
 func TestRegisterIsRateLimited(t *testing.T) {
 	a := testrig.App(t)
 	for i := 0; i < 31; i++ {

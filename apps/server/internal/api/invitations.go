@@ -107,7 +107,11 @@ func (d Deps) GetInvitation(ctx context.Context, req gen.GetInvitationRequestObj
 	if row.InviterName != "" {
 		inviter = &row.InviterName
 	}
-	return gen.GetInvitation200JSONResponse{Id: row.ID, OrganizationName: row.OrganizationName, InviterName: inviter, Role: firstRole(row.Roles), Status: row.Status, TeamName: row.TeamName, ExpiresAt: optTime(row.ExpiresAt), HasAccount: n > 0}, nil
+	status := row.Status
+	if status == "pending" && row.ExpiresAt.Valid && row.ExpiresAt.Time.Before(time.Now()) {
+		status = "expired"
+	}
+	return gen.GetInvitation200JSONResponse{Id: row.ID, OrganizationName: row.OrganizationName, InviterName: inviter, Role: firstRole(row.Roles), Status: status, TeamName: row.TeamName, ExpiresAt: optTime(row.ExpiresAt), HasAccount: n > 0}, nil
 }
 
 // joinTeamIfInvited adds the team membership an invitation carried.
@@ -129,7 +133,9 @@ func (d Deps) AcceptInvitation(ctx context.Context, req gen.AcceptInvitationRequ
 		return nil, err
 	}
 	if err := d.joinTeamIfInvited(ctx, inv.ID, s.UserID); err != nil {
-		return nil, err
+		// The org membership already happened; an admin can repair team
+		// membership with POST /api/teams/{id}/members.
+		d.log().Error("team join after invitation accept failed", "event", "invitation.team_join_failed", "invitation", inv.ID, "user", s.UserID, "error", err.Error())
 	}
 	if err := d.Auth.SetActiveOrganization(ctx, s.Token, inv.OrganizationID); err != nil {
 		return nil, err
@@ -157,6 +163,10 @@ func (d Deps) RegisterWithInvitation(ctx context.Context, req gen.RegisterWithIn
 	if row.Status != "pending" || (row.ExpiresAt.Valid && row.ExpiresAt.Time.Before(time.Now())) {
 		return nil, fail(http.StatusGone, "INVITATION_INVALID", "This invitation is no longer valid")
 	}
+	name := strings.TrimSpace(req.Body.Name)
+	if name == "" || len(name) > 120 {
+		return nil, fail(http.StatusBadRequest, "VALIDATION_FAILED", "Name is required")
+	}
 	if n, err := d.Q.CountUsersByEmail(ctx, row.Email); err != nil {
 		return nil, err
 	} else if n > 0 {
@@ -166,7 +176,7 @@ func (d Deps) RegisterWithInvitation(ctx context.Context, req gen.RegisterWithIn
 	if !ok {
 		return nil, errors.New("api: RegisterWithInvitation needs CaptureHTTP")
 	}
-	userID, err := d.Auth.CreateUser(ctx, req.Body.Name, row.Email, req.Body.Password)
+	userID, err := d.Auth.CreateUser(ctx, name, row.Email, req.Body.Password)
 	if err != nil {
 		return nil, err
 	}
@@ -175,7 +185,9 @@ func (d Deps) RegisterWithInvitation(ctx context.Context, req gen.RegisterWithIn
 		return nil, err
 	}
 	if err := d.joinTeamIfInvited(ctx, inv.ID, userID); err != nil {
-		return nil, err
+		// The org membership already happened; an admin can repair team
+		// membership with POST /api/teams/{id}/members.
+		d.log().Error("team join after invitation accept failed", "event", "invitation.team_join_failed", "invitation", inv.ID, "user", userID, "error", err.Error())
 	}
 	if err := d.Auth.StartSession(ctx, w, r, userID); err != nil {
 		return nil, err

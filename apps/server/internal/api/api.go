@@ -96,8 +96,8 @@ func handleNotFound(w http.ResponseWriter, _ *http.Request) {
 	respond.Error(w, http.StatusNotFound, "NOT_FOUND", "Not found")
 }
 
-func requestErrorHandler(w http.ResponseWriter, r *http.Request, err error) {
-	slog.Default().Error("invalid request", "event", "request.invalid", "method", r.Method, "path", r.URL.Path, "error", err.Error())
+func (d Deps) requestErrorHandler(w http.ResponseWriter, r *http.Request, err error) {
+	d.log().Error("invalid request", "event", "request.invalid", "method", r.Method, "path", r.URL.Path, "error", err.Error())
 	respond.Error(w, http.StatusBadRequest, "VALIDATION_FAILED", "Invalid request")
 }
 
@@ -126,8 +126,8 @@ func noStore(next http.Handler) http.Handler {
 func NewHandler(d Deps) http.Handler {
 	spec := loadSpec()
 	assertTierCoverage(spec)
-	if d.Auth == nil || d.Q == nil || d.RateLimit == nil || d.Hasher == nil {
-		panic("api: NewHandler needs Auth, Q, RateLimit and Hasher")
+	if d.Auth == nil || d.Q == nil || d.RateLimit == nil || d.Hasher == nil || d.Storage == nil || d.Email == nil {
+		panic("api: NewHandler needs Auth, Q, RateLimit, Hasher, Storage and Email")
 	}
 
 	mux := http.NewServeMux()
@@ -139,7 +139,7 @@ func NewHandler(d Deps) http.Handler {
 	mux.Handle("/", withSpecValidation(spec, http.HandlerFunc(handleNotFound)))
 
 	strict := gen.NewStrictHandlerWithOptions(d, []gen.StrictMiddlewareFunc{d.tierMiddleware()}, gen.StrictHTTPServerOptions{
-		RequestErrorHandlerFunc:  requestErrorHandler,
+		RequestErrorHandlerFunc:  d.requestErrorHandler,
 		ResponseErrorHandlerFunc: d.responseErrorHandler,
 	})
 	gen.HandlerWithOptions(strict, gen.StdHTTPServerOptions{

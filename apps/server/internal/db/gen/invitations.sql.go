@@ -12,7 +12,7 @@ import (
 )
 
 const getInvitation = `-- name: GetInvitation :one
-SELECT i."id", i."organization_id", i."email", COALESCE(i."roles", '') AS roles, i."status", i."token",
+SELECT i."id", i."organization_id", i."email", COALESCE(i."roles", '') AS roles, i."status",
     i."expires_at", i."created_at",
     o."name" AS organization_name, o."slug" AS organization_slug,
     COALESCE(u."name", '') AS inviter_name,
@@ -31,7 +31,6 @@ type GetInvitationRow struct {
 	Email            string
 	Roles            string
 	Status           string
-	Token            string
 	ExpiresAt        pgtype.Timestamptz
 	CreatedAt        pgtype.Timestamptz
 	OrganizationName string
@@ -41,8 +40,10 @@ type GetInvitationRow struct {
 	TeamName         *string
 }
 
-// The public view plus everything accept/register need. inviter/team joins
-// are LEFT so a deleted inviter or team never hides the invitation.
+// The public view plus everything accept/register need. The inviter join is
+// LEFT because "inviter_id" is nullable; the team join is LEFT so a deleted
+// team never hides the invitation. "organization_invitations.inviter_id" is
+// ON DELETE CASCADE, so deleting an admin removes their pending invitations.
 func (q *Queries) GetInvitation(ctx context.Context, id string) (GetInvitationRow, error) {
 	row := q.db.QueryRow(ctx, getInvitation, id)
 	var i GetInvitationRow
@@ -52,7 +53,6 @@ func (q *Queries) GetInvitation(ctx context.Context, id string) (GetInvitationRo
 		&i.Email,
 		&i.Roles,
 		&i.Status,
-		&i.Token,
 		&i.ExpiresAt,
 		&i.CreatedAt,
 		&i.OrganizationName,
@@ -71,6 +71,7 @@ FROM "organization_invitations" i
 LEFT JOIN "invitation_teams" it ON it."invitation_id" = i."id"
 LEFT JOIN "teams" t ON t."id" = it."team_id"
 WHERE i."organization_id" = $1 AND i."status" = 'pending'
+    AND (i."expires_at" IS NULL OR i."expires_at" > now())
 ORDER BY i."created_at" DESC
 `
 

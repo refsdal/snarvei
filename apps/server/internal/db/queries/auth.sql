@@ -34,7 +34,7 @@ JOIN "organization_member_roles" r ON r."member_id" = m."id"
 WHERE m."organization_id" = $1 AND m."user_id" = $2;
 
 -- name: GetInvitationToken :one
-SELECT "token", "organization_id", "email", "status" FROM "organization_invitations" WHERE "id" = $1;
+SELECT "token", "organization_id", "email", "status", "expires_at" FROM "organization_invitations" WHERE "id" = $1;
 
 -- name: CountUsersByEmail :one
 SELECT COUNT(*)::int FROM "users" WHERE lower("email") = lower($1);

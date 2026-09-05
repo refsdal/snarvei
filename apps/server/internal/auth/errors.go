@@ -16,6 +16,7 @@ var (
 	ErrInvitationExists        = errors.New("auth: a pending invitation already exists for this email")
 	ErrInvitationEmailMismatch = errors.New("auth: invitation was sent to a different email address")
 	ErrInvitationInvalid       = errors.New("auth: invitation is no longer valid")
+	ErrInvalidSlug             = errors.New("auth: invalid organization slug")
 	ErrForbidden               = errors.New("auth: forbidden")
 	ErrNotFound                = errors.New("auth: not found")
 	ErrSessionNotFound         = errors.New("auth: session not found")

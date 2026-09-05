@@ -8,10 +8,10 @@ import (
 
 func TestFromRequest(t *testing.T) {
 	cases := []struct {
-		name          string
-		remote, xff   string
-		hops          int
-		want          string
+		name        string
+		remote, xff string
+		hops        int
+		want        string
 	}{
 		{"zero hops ignores the header", "10.0.0.1:5555", "1.2.3.4", 0, "10.0.0.1"},
 		{"one hop picks the rightmost entry", "10.0.0.1:5555", "9.9.9.9, 1.2.3.4", 1, "1.2.3.4"},

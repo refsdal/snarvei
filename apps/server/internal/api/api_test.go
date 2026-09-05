@@ -13,6 +13,7 @@ import (
 	dbgen "github.com/refsdal/snarvei/server/internal/db/gen"
 	"github.com/refsdal/snarvei/server/internal/email"
 	"github.com/refsdal/snarvei/server/internal/ratelimit"
+	"github.com/refsdal/snarvei/server/internal/storage"
 	"github.com/refsdal/snarvei/server/internal/testrig"
 )
 
@@ -46,6 +47,8 @@ func deps(t *testing.T, rig *testrig.Rig, appName string, openSignup bool, versi
 		Pool:       rig.Pool,
 		Q:          q,
 		Auth:       svc,
+		Storage:    storage.NewMemory(),
+		Email:      email.NewRecording(),
 		RateLimit:  ratelimit.NewPostgres(q),
 		Hasher:     hasher,
 		AppName:    appName,
