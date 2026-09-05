@@ -2,7 +2,7 @@ import { Alert, Box, Button, CircularProgress, Paper, Stack, Typography } from "
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useWorkspace } from "../../hooks/use-workspace-context";
-import { authClient, type InvitationDetails } from "../../lib/auth-client";
+import { authClient, type InvitationDetails } from "../../lib/legacy-auth-client";
 import { buildOrganizationPath } from "../../lib/routes";
 import { roleLabel } from "../../types";
 

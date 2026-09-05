@@ -1,149 +1,108 @@
-import { createAuthClient } from "better-auth/react";
-import { passkeyClient } from "@better-auth/passkey/client";
-import { organizationClient, twoFactorClient } from "better-auth/client/plugins";
+import { createAuthClient } from "limen-auth/react";
+import { credentialPasswordPlugin, twoFactorPlugin } from "limen-auth/plugins";
+import { resetCache } from "./query";
 
-type ClientError = {
-  message?: string | null;
-} | null;
+// Only what the server's allowlist mounts (apps/server/internal/auth/routes.go):
+// credential sign-in/sign-up, sign-out, password change/reset, two-factor.
+// Sessions, organizations and invitations are Snarvei's own /api routes and
+// go through lib/api.ts.
+//
+// The SDK's session store is deliberately unused for rendering: Limen's
+// payload has no user id and no active organization, so GET /api/me (the
+// ['me'] query) is the single truth. crossTabSync/refetchOnWindowFocus are
+// off so the store never polls /api/auth/me on its own.
+let challengePending = false;
 
-type ClientResult<T> = Promise<{
-  data?: T | null;
-  error?: ClientError;
-}>;
+// Factory so a shell script (or a test) can point the client at a server
+// running on a different origin; the app itself always uses "" (same
+// origin — see lib/api.ts).
+export function createSnarveiAuthClient(baseURL: string) {
+  return createAuthClient({
+    baseURL,
+    basePath: "/api/auth",
+    crossTabSync: false,
+    refetchOnWindowFocus: false,
+    plugins: [
+      credentialPasswordPlugin(),
+      twoFactorPlugin({
+        onTwoFactorRedirect: () => {
+          challengePending = true;
+        },
+      }),
+    ],
+  });
+}
 
-type ClientQueryResult<T> = {
-  data: T | null | undefined;
-  error?: ClientError;
-  isPending: boolean;
-  isRefetching?: boolean;
-  refetch: () => Promise<void>;
+export const authClient = createSnarveiAuthClient("");
+
+/**
+ * Email + password. Resolves { twoFactorRequired: true } when the server
+ * answered with a two-factor challenge (the challenge cookie is set; call
+ * verifyTwoFactor next). Throws LimenError on bad credentials.
+ */
+export async function signInWithPassword(email: string, password: string): Promise<{ twoFactorRequired: boolean }> {
+  challengePending = false;
+  try {
+    await authClient.signIn.credential({ credential: email, password });
+  } catch (err) {
+    // The challenge response has no session; if the SDK trips over that
+    // after firing onTwoFactorRedirect, the challenge still stands.
+    if (!challengePending) throw err;
+  }
+  const required = challengePending;
+  challengePending = false;
+  if (!required) await resetCache();
+  return { twoFactorRequired: required };
+}
+
+/** TOTP or backup code (the server recognises backup codes by shape). */
+export async function verifyTwoFactor(code: string): Promise<void> {
+  await authClient.twoFactor.verify({ code: code.trim(), method: "totp" });
+  await resetCache();
+}
+
+export async function signUpWithPassword(name: string, email: string, password: string): Promise<void> {
+  await authClient.signUp.credential({ email, password, additionalFields: { name: name.trim() } });
+  await resetCache();
+}
+
+export async function signOut(): Promise<void> {
+  try {
+    await authClient.signout();
+  } finally {
+    await resetCache();
+  }
+}
+
+export const password = {
+  async requestReset(email: string): Promise<void> {
+    await authClient.password.requestReset({ email });
+  },
+  async reset(token: string, newPassword: string): Promise<void> {
+    await authClient.password.reset({ token, newPassword });
+  },
+  async change(currentPassword: string, newPassword: string): Promise<void> {
+    await authClient.password.change({ currentPassword, newPassword, revokeOtherSessions: true });
+  },
 };
 
-type OrganizationSummary = {
-  id: string;
-  name: string;
-  slug?: string;
+export const twoFactor = {
+  async initiateSetup(password: string): Promise<{ uri: string }> {
+    return authClient.twoFactor.initiateSetup({ password });
+  },
+  async finalizeSetup(code: string): Promise<void> {
+    await authClient.twoFactor.finalizeSetup({ code: code.trim() });
+  },
+  async disable(password: string): Promise<void> {
+    await authClient.twoFactor.disable({ password });
+  },
+  async getTotpUri(): Promise<{ uri: string }> {
+    return authClient.twoFactor.getTotpUri();
+  },
+  async getBackupCodes(): Promise<string[]> {
+    return authClient.twoFactor.getBackupCodes();
+  },
+  async regenerateBackupCodes(): Promise<string[]> {
+    return authClient.twoFactor.regenerateBackupCodes();
+  },
 };
-
-type AuthSession = {
-  id: string;
-  token: string;
-  createdAt?: string | number;
-  updatedAt?: string | number;
-  expiresAt?: string | number;
-  ipAddress?: string | null;
-  userAgent?: string | null;
-};
-
-type PasskeySummary = {
-  id: string;
-  name?: string | null;
-  createdAt?: string | number | null;
-  deviceType?: string | null;
-  backedUp?: boolean;
-};
-
-type SnarveiAuthClient = {
-  useSession: () => ClientQueryResult<unknown>;
-  useListOrganizations: () => ClientQueryResult<OrganizationSummary[]>;
-  useActiveOrganization: () => ClientQueryResult<OrganizationSummary>;
-  updateUser: (input: { name?: string; image?: string | null }) => ClientResult<unknown>;
-  changeEmail: (input: { newEmail: string; callbackURL?: string }) => ClientResult<unknown>;
-  changePassword: (input: {
-    currentPassword: string;
-    newPassword: string;
-    revokeOtherSessions?: boolean;
-  }) => ClientResult<unknown>;
-  requestPasswordReset: (input: { email: string; redirectTo?: string }) => ClientResult<unknown>;
-  resetPassword: (input: { newPassword: string; token: string }) => ClientResult<unknown>;
-  listSessions: () => ClientResult<AuthSession[]>;
-  revokeSession: (input: { token: string }) => ClientResult<unknown>;
-  revokeOtherSessions: () => ClientResult<unknown>;
-  signIn: {
-    email: (input: { email: string; password: string }) => ClientResult<unknown>;
-    passkey: (input?: {
-      autoFill?: boolean;
-      extensions?: Record<string, unknown>;
-      returnWebAuthnResponse?: boolean;
-    }) => ClientResult<unknown>;
-  };
-  signUp: {
-    email: (input: { name: string; email: string; password: string }) => ClientResult<unknown>;
-  };
-  signOut: () => Promise<unknown>;
-  twoFactor: {
-    enable: (input: {
-      password?: string;
-      issuer?: string;
-    }) => ClientResult<{ totpURI?: string; backupCodes?: string[] }>;
-    disable: (input: { password?: string }) => ClientResult<unknown>;
-    getTotpUri: (input: { password?: string }) => ClientResult<{ totpURI?: string }>;
-    verifyTotp: (input: { code: string; trustDevice?: boolean }) => ClientResult<unknown>;
-    verifyBackupCode: (input: {
-      code: string;
-      trustDevice?: boolean;
-      disableSession?: boolean;
-    }) => ClientResult<unknown>;
-    generateBackupCodes: (input: { password?: string }) => ClientResult<{ backupCodes?: string[] }>;
-    viewBackupCodes: (input?: { userId?: string | null }) => ClientResult<{ backupCodes?: string[] }>;
-  };
-  passkey: {
-    addPasskey: (input?: {
-      name?: string;
-      authenticatorAttachment?: "platform" | "cross-platform";
-      extensions?: Record<string, unknown>;
-      returnWebAuthnResponse?: boolean;
-      context?: string;
-    }) => ClientResult<unknown>;
-    listUserPasskeys: (input?: Record<string, never>) => ClientResult<PasskeySummary[]>;
-    deletePasskey: (input: { id: string }) => ClientResult<unknown>;
-    updatePasskey: (input: { id: string; name: string }) => ClientResult<unknown>;
-  };
-  organization: {
-    create: (input: { name: string; slug: string }) => ClientResult<{ id?: string }>;
-    list: (input: Record<string, never>) => ClientResult<OrganizationSummary[]>;
-    setActive: (input: { organizationId?: string | null; organizationSlug?: string | null }) => ClientResult<unknown>;
-    createTeam: (input: { name: string; organizationId: string }) => ClientResult<{ id?: string }>;
-    listTeams: (input: { query: { organizationId: string } }) => ClientResult<unknown>;
-    listMembers: (input: { query: { organizationId: string } }) => ClientResult<unknown>;
-    listInvitations: (input: { query: { organizationId: string } }) => ClientResult<unknown>;
-    inviteMember: (input: {
-      email: string;
-      role: string | string[];
-      organizationId: string;
-      teamId?: string;
-    }) => ClientResult<unknown>;
-    cancelInvitation: (input: { invitationId: string }) => ClientResult<unknown>;
-    getInvitation: (input: { query: { id: string } }) => ClientResult<InvitationDetails>;
-    acceptInvitation: (input: { invitationId: string }) => ClientResult<unknown>;
-    rejectInvitation: (input: { invitationId: string }) => ClientResult<unknown>;
-    addTeamMember: (input: { teamId: string; userId: string; organizationId?: string }) => ClientResult<unknown>;
-    removeTeamMember: (input: { teamId: string; userId: string; organizationId?: string }) => ClientResult<unknown>;
-  };
-};
-
-export type InvitationDetails = {
-  id: string;
-  email: string;
-  role: string | string[];
-  status: string;
-  expiresAt?: string | number;
-  organizationId: string;
-  organizationName: string;
-  organizationSlug?: string;
-  inviterEmail?: string;
-  teamId?: string | null;
-};
-
-// Better Auth's organization plugin currently exposes non-portable inferred types under TS 6.
-// Keep a narrow app-local surface here so the build stays green while preserving the methods
-// this app actually uses and exercises in the E2E flow.
-export const authClient = createAuthClient({
-  plugins: [
-    organizationClient({
-      teams: { enabled: true },
-    }),
-    twoFactorClient(),
-    passkeyClient(),
-  ],
-}) as unknown as SnarveiAuthClient;

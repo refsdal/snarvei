@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { authClient } from "../../../lib/auth-client";
+import { authClient } from "../../../lib/legacy-auth-client";
 import type { AppMessage, AuthSession, PasskeySummary, SessionData } from "../../../types";
 
 type LoadResult<T> = { items: T[]; error: string | null };

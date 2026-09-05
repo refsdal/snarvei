@@ -1,7 +1,7 @@
 import AddPhotoAlternateOutlinedIcon from "@mui/icons-material/AddPhotoAlternateOutlined";
 import { Avatar, Button, Chip, Stack, TextField, Typography } from "@mui/material";
 import { useRef } from "react";
-import { authClient } from "../../../lib/auth-client";
+import { authClient } from "../../../lib/legacy-auth-client";
 import type { SessionData } from "../../../types";
 import { SectionCard } from "./section-card";
 import type { SharedSectionProps } from "./types";

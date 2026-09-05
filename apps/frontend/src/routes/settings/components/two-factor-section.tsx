@@ -1,7 +1,7 @@
 import ShieldOutlinedIcon from "@mui/icons-material/ShieldOutlined";
 import { Box, Button, Chip, Stack, TextField, Typography } from "@mui/material";
 import QRCode from "react-qr-code";
-import { authClient } from "../../../lib/auth-client";
+import { authClient } from "../../../lib/legacy-auth-client";
 import type { SessionData } from "../../../types";
 import { SectionCard } from "./section-card";
 import type { SharedSectionProps } from "./types";

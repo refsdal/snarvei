@@ -1,6 +1,6 @@
 import KeyOutlinedIcon from "@mui/icons-material/KeyOutlined";
 import { Button, Stack, TextField } from "@mui/material";
-import { authClient } from "../../../lib/auth-client";
+import { authClient } from "../../../lib/legacy-auth-client";
 import { SectionCard } from "./section-card";
 import type { SharedSectionProps } from "./types";
 

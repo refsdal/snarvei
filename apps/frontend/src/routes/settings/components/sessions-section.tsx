@@ -1,6 +1,6 @@
 import ShieldOutlinedIcon from "@mui/icons-material/ShieldOutlined";
 import { Alert, Button, Chip, CircularProgress, List, ListItem, ListItemText, Stack, Typography } from "@mui/material";
-import { authClient } from "../../../lib/auth-client";
+import { authClient } from "../../../lib/legacy-auth-client";
 import type { AuthSession } from "../../../types";
 import { SectionCard } from "./section-card";
 import type { SharedSectionProps } from "./types";

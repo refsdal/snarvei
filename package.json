@@ -7,6 +7,7 @@
   "workspaces": ["apps/frontend"],
   "// backend": "apps/server is a Go module with no package.json: `cd apps/server && go run ./cmd/snarvei` (default mode), `... migrate`, `... server`, `... healthcheck`; `go test -p 1 ./...` for its suite. The scripts below cover the SPA only.",
   "scripts": {
+    "gen:client": "bunx --package openapi-typescript@7.13.0 openapi-typescript openapi/snarvei.yaml -o apps/frontend/src/lib/api-schema.d.ts",
     "dev": "bun run --filter @snarvei/frontend dev",
     "dev:server": "cd apps/server && go run ./cmd/snarvei",
     "build": "bun run --filter @snarvei/frontend build",

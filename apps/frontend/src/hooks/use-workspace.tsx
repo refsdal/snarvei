@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { authClient } from "../lib/auth-client";
+import { authClient } from "../lib/legacy-auth-client";
 import type {
   AnalyticsSummary,
   AppMessage,

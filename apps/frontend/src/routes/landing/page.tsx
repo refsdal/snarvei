@@ -13,7 +13,7 @@ import {
 } from "@mui/material";
 import { useState } from "react";
 import { Navigate, useNavigate, useSearchParams } from "react-router-dom";
-import { authClient } from "../../lib/auth-client";
+import { authClient } from "../../lib/legacy-auth-client";
 import { useWorkspace } from "../../hooks/use-workspace-context";
 
 const inputStyle = {

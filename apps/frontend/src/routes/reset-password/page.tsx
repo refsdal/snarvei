@@ -1,7 +1,7 @@
 import { Alert, Box, Button, Card, CardContent, Stack, TextField, Typography } from "@mui/material";
 import { useState } from "react";
 import { Link as RouterLink, useNavigate, useSearchParams } from "react-router-dom";
-import { authClient } from "../../lib/auth-client";
+import { authClient } from "../../lib/legacy-auth-client";
 
 export const MIN_PASSWORD_LENGTH = 8;
 

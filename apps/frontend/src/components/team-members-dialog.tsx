@@ -19,7 +19,7 @@ import {
   Typography,
 } from "@mui/material";
 import { useEffect, useState } from "react";
-import { authClient } from "../lib/auth-client";
+import { authClient } from "../lib/legacy-auth-client";
 import { readErrorMessage } from "../types";
 import type { Member, Team, TeamMember } from "../types";
 

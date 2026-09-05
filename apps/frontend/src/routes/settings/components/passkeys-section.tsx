@@ -1,6 +1,6 @@
 import VpnKeyOutlinedIcon from "@mui/icons-material/VpnKeyOutlined";
 import { Alert, Box, Button, CircularProgress, Stack, TextField, Typography } from "@mui/material";
-import { authClient } from "../../../lib/auth-client";
+import { authClient } from "../../../lib/legacy-auth-client";
 import type { PasskeySummary } from "../../../types";
 import { SectionCard } from "./section-card";
 import type { SharedSectionProps } from "./types";
