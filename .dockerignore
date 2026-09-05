@@ -1,0 +1,4 @@
+# COPY-only image: allowlist exactly what the Dockerfile copies.
+*
+!dist/server
+!docker/data-skel

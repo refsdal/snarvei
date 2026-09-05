@@ -1,0 +1,60 @@
+# Snarvei, whole stack, from source:
+#   cp .env.example .env          # set AUTH_SECRET at minimum
+#   bash scripts/build-artifacts.sh
+#   docker compose up --build
+name: snarvei
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: snarvei
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-snarvei}
+      POSTGRES_DB: snarvei
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U snarvei -d snarvei"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  app:
+    build: .
+    image: snarvei:local
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "${PORT:-3000}:3000"
+    volumes:
+      - snarvei-data:/data
+    environment: &app-env
+      DATABASE_URL: postgres://snarvei:${POSTGRES_PASSWORD:-snarvei}@db:5432/snarvei
+      APP_URL: ${APP_URL:-http://localhost:3000}
+      AUTH_SECRET: "${AUTH_SECRET:?set AUTH_SECRET in .env (openssl rand -base64 32)}"
+      STORAGE_DRIVER: fs
+      STORAGE_FS_PATH: /data
+      OPEN_SIGNUP: ${OPEN_SIGNUP:-1}
+      TRUSTED_PROXY_HOPS: ${TRUSTED_PROXY_HOPS:-0}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-}
+      SMTP_USERNAME: ${SMTP_USERNAME:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      EMAIL_FROM: ${EMAIL_FROM:-}
+
+  # One-off: `docker compose run --rm migrate`
+  migrate:
+    build: .
+    image: snarvei:local
+    profiles: ["tools"]
+    depends_on:
+      db:
+        condition: service_healthy
+    command: ["migrate"]
+    environment: *app-env
+
+volumes:
+  db-data:
+  snarvei-data:
