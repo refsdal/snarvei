@@ -1,0 +1,30 @@
+{
+  "$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
+  "files": {
+    "includes": [
+      "apps/**",
+      "scripts/**",
+      "e2e/**",
+      "*.ts",
+      "!apps/server",
+      "!apps/frontend/src/lib/api-schema.d.ts",
+      "!e2e/test-results",
+      "!e2e/playwright-report"
+    ]
+  },
+  "formatter": {
+    "enabled": true,
+    "indentStyle": "space",
+    "indentWidth": 2,
+    "lineWidth": 120
+  },
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "preset": "recommended",
+      "style": { "noNonNullAssertion": "off" },
+      "correctness": { "useExhaustiveDependencies": "warn" }
+    }
+  },
+  "assist": { "actions": { "source": { "organizeImports": "off" } } }
+}

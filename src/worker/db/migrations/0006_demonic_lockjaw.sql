@@ -1,1 +1,0 @@
-CREATE INDEX `click_events_link_id_clicked_at_idx` ON `click_events` (`link_id`,`clicked_at`);

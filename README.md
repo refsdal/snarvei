@@ -1,3 +1,10 @@
+> **Migration in progress (2026-09).** Snarvei is moving from Cloudflare Workers to a
+> Go server with an embedded SPA, shipped as a container. The stack, routes and
+> operations described below are the OLD ones until phase 5 rewrites this file.
+> The design is `docs/superpowers/specs/2026-09-04-go-backend-migration-design.md`;
+> the current phase plan is under `docs/superpowers/plans/`. Backend: `apps/server`
+> (Go); frontend: `apps/frontend`; build: `scripts/build-artifacts.sh`.
+
 # Snarvei
 
 Snarvei is a multi-organization URL shortener and redirect management system built for teams that need control after a link has already been distributed.
