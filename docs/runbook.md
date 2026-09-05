@@ -82,13 +82,19 @@ rotation if stable hashes across a secret rotation matter to you.
 | Users get `429` | (a `Retry-After` header on the response) | Expected under abuse. `/l/*` and a handful of write endpoints are rate-limited per hashed IP by Snarvei's own Postgres-backed limiter, safe across replicas; `/api/auth/*` sign-in/sign-up/two-factor limits are Limen's own and — for now — in-memory per replica, so the effective limit scales with replica count |
 | Redirect works but no click recorded | `click.record_failed` | The async click write failed (link id and slug are in the log line) — check Postgres health and capacity |
 | Server logs `click.drain_timeout` on shutdown | `click.drain_timeout` | The in-flight click recorder did not finish within its 5 s shutdown budget — a handful of clicks near a restart can be lost, matching the previous best-effort guarantee; frequent occurrences point at a slow or overloaded database |
-| Unexpected `500` on an API route | `request.error` (has `requestId`, `userId`, `path`) | Inspect the stack in the container logs; correlate with the `version` reported by `/healthz` |
+| Unexpected `500` on an API route | `request.error` (fields: `method`, `path`, `error`) | There is no per-request access log (no request id, status code or duration), so find the matching line by `path` and timestamp; the `error` field has the underlying Go error. Correlate with the `version` reported by `/healthz` |
 
 ## Where to look
 
 - Container logs: one JSON line per event on stdout (`time`, `level`,
-  `event`, plus `requestId`/`userId`/`path`/`status`/`durationMs` where
-  relevant). Filter by `event` for any of the names above.
+  `msg`, and an `event` key on the named events in the table above — each
+  carries only the fields listed there, e.g. `request.error` has `method`,
+  `path`, `error`; `click.record_failed` has `link`, `slug`, `error`).
+  There is no per-request access log: no request id, status code or
+  duration is logged for ordinary traffic, so correlate a report with a log
+  line by `path` and timestamp, not by a shared id. The boot line
+  (`"snarvei listening"`) carries `version`, `port`, `app_url`, `storage`
+  and `disabled`.
 - `/healthz` reports the running `version` — compare it against the tag you
   expect to be deployed.
 - GitHub Actions (`.github/workflows/release.yml`) for the release history:
