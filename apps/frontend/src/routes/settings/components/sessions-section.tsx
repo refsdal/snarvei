@@ -1,5 +1,6 @@
 import ShieldOutlinedIcon from "@mui/icons-material/ShieldOutlined";
 import { Alert, Button, Chip, CircularProgress, List, ListItem, ListItemText, Stack, Typography } from "@mui/material";
+import { errorMessage } from "../../../lib/api";
 import { useRevokeOtherSessions, useRevokeSession, useSessions } from "../../../lib/data";
 import type { SessionSummary } from "../../../lib/data";
 import { SectionCard } from "./section-card";
@@ -19,6 +20,11 @@ const formatDateValue = (value: string | number | null | undefined) => {
 };
 
 const describeSession = (session: SessionSummary) => session.userAgent || "Browser session";
+
+const describeActivity = (session: SessionSummary) =>
+  `Created ${formatDateValue(session.createdAt)} · Last active ${
+    session.lastAccess ? formatDateValue(session.lastAccess) : "never"
+  } · Expires ${formatDateValue(session.expiresAt)}`;
 
 export function SessionsSection(props: SharedSectionProps) {
   const sessions = useSessions();
@@ -55,47 +61,53 @@ export function SessionsSection(props: SharedSectionProps) {
           </Button>
         </Stack>
         {sessions.isPending ? <CircularProgress size={24} /> : null}
-        <List sx={{ display: "grid", gap: 1, p: 0 }}>
-          {sessionList.map((session) => (
-            <ListItem
-              key={session.id}
-              sx={{
-                px: 2,
-                py: 1.5,
-                border: "1px solid rgba(255,255,255,0.08)",
-                borderRadius: 3,
-                display: "flex",
-                gap: 2,
-                alignItems: "center",
-              }}
-              secondaryAction={
-                <Button
-                  color="inherit"
-                  disabled={session.current || props.busyAction === `revoke-${session.id}`}
-                  onClick={() =>
-                    void props.runAction(`revoke-${session.id}`, async () => {
-                      await revokeSession.mutateAsync(session.id);
-                      props.setMessage({ severity: "success", text: "Session revoked." });
-                    })
-                  }
-                >
-                  Revoke
-                </Button>
-              }
-            >
-              <ListItemText
-                primary={
-                  <Stack direction="row" spacing={1} sx={{ alignItems: "center", flexWrap: "wrap" }}>
-                    <Typography sx={{ fontWeight: 700 }}>{describeSession(session)}</Typography>
-                    {session.current ? <Chip label="Current session" size="small" color="secondary" /> : null}
-                  </Stack>
+        {sessions.isError ? (
+          <Alert severity="error">{errorMessage(sessions.error, "Unable to load active sessions.")}</Alert>
+        ) : (
+          <List sx={{ display: "grid", gap: 1, p: 0 }}>
+            {sessionList.map((session) => (
+              <ListItem
+                key={session.id}
+                sx={{
+                  px: 2,
+                  py: 1.5,
+                  border: "1px solid rgba(255,255,255,0.08)",
+                  borderRadius: 3,
+                  display: "flex",
+                  gap: 2,
+                  alignItems: "center",
+                }}
+                secondaryAction={
+                  <Button
+                    color="inherit"
+                    disabled={session.current || props.busyAction === `revoke-${session.id}`}
+                    onClick={() =>
+                      void props.runAction(`revoke-${session.id}`, async () => {
+                        await revokeSession.mutateAsync(session.id);
+                        props.setMessage({ severity: "success", text: "Session revoked." });
+                      })
+                    }
+                  >
+                    Revoke
+                  </Button>
                 }
-                secondary={`Created ${formatDateValue(session.createdAt)} · Expires ${formatDateValue(session.expiresAt)}`}
-              />
-            </ListItem>
-          ))}
-          {!sessions.isPending && !sessionList.length ? <Alert severity="info">No active sessions found.</Alert> : null}
-        </List>
+              >
+                <ListItemText
+                  primary={
+                    <Stack direction="row" spacing={1} sx={{ alignItems: "center", flexWrap: "wrap" }}>
+                      <Typography sx={{ fontWeight: 700 }}>{describeSession(session)}</Typography>
+                      {session.current ? <Chip label="Current session" size="small" color="secondary" /> : null}
+                    </Stack>
+                  }
+                  secondary={describeActivity(session)}
+                />
+              </ListItem>
+            ))}
+            {!sessions.isPending && !sessionList.length ? (
+              <Alert severity="info">No active sessions found.</Alert>
+            ) : null}
+          </List>
+        )}
       </Stack>
     </SectionCard>
   );
