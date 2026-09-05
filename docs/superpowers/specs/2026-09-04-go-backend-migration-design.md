@@ -209,15 +209,19 @@ Organizations:
 - `POST /api/invitations/{id}/register` (public; name, password): for an
   invitee whose email has no account. Creates the user through Limen's Go
   API, accepts the invitation and starts a session. Works regardless of
-  `OPEN_SIGNUP`; rate-limited (section 3).
+  `OPEN_SIGNUP`; rate-limited (section 3). The invitation id is the
+  credential: whoever holds the link can register the account bound to the
+  invitee's email (the same trust model as before), so links must not be
+  exposed.
 
 Teams:
 
 - `GET /api/organizations/{orgId}/teams` → teams the caller can see (all for
   owner/admin, own teams for member), with member counts.
 - `POST /api/organizations/{orgId}/teams` (name) → owner/admin.
-- `GET /api/teams/{teamId}/members`, `POST /api/teams/{teamId}/members`
-  (userId), `DELETE /api/teams/{teamId}/members/{userId}` → owner/admin.
+- `GET /api/teams/{teamId}/members` → any member of the team, plus
+  owner/admin. `POST /api/teams/{teamId}/members` (userId),
+  `DELETE /api/teams/{teamId}/members/{userId}` → owner/admin.
 
 Links:
 
@@ -339,12 +343,16 @@ which accounts exist only by accepting an invitation: `POST
   for the address it writes into session metadata, so nothing stores a raw IP.
 - Rate limits: Limen's own database-backed limiter on `/api/auth/*` with its
   defaults for sign-in, sign-up and two-factor and a base rule of 60 per
-  minute. Snarvei's `internal/ratelimit` on `/l/*` at 100 requests per 60 s
-  per hashed IP, `429` with `Retry-After`, counters in the `rate_limit` table
-  (fixed window, upsert, rows older than two windows deleted opportunistically
-  on write). `POST /api/invitations/{id}/register`, `POST /api/me/email` and
-  `POST /api/links` share a 30 per minute per hashed IP rule from the same
-  package.
+  minute. In practice this limiter is in-memory per replica for now: Limen
+  v0.2.1's DB store int32-casts pgx's int64, so its Postgres-backed store
+  cannot be used as-is (fix upstream, or wrap
+  `POST /api/auth/signin/credential` with Snarvei's own Postgres limiter,
+  when running more than one `server` replica). Snarvei's `internal/ratelimit`
+  on `/l/*` at 100 requests per 60 s per hashed IP, `429` with `Retry-After`,
+  counters in the `rate_limit` table (fixed window, upsert, rows older than
+  two windows deleted opportunistically on write). `POST
+  /api/invitations/{id}/register`, `POST /api/me/email` and `POST /api/links`
+  share a 30 per minute per hashed IP rule from the same package.
 
 ### Logging
 
