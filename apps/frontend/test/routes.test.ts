@@ -1,10 +1,15 @@
 import { describe, expect, test } from "bun:test";
-import { afterAuthPath, buildLinksPath, buildOrganizationPath, settingsPath } from "../src/lib/routes";
+import { afterAuthPath, buildLinksPath, buildOrganizationPath, orgParams, settingsPath } from "../src/lib/routes";
 
 describe("route helpers", () => {
   test("prefers the organization slug over its id", () => {
     expect(buildOrganizationPath({ id: "org_1", slug: "acme" })).toBe("/app/acme/dashboard");
     expect(buildOrganizationPath({ id: "org_1", slug: undefined })).toBe("/app/org_1/dashboard");
+  });
+
+  test("orgParams prefers the slug over the id", () => {
+    expect(orgParams({ id: "org_1", slug: "acme" })).toEqual({ org: "acme" });
+    expect(orgParams({ id: "org_1", slug: undefined })).toEqual({ org: "org_1" });
   });
 
   test("builds link list and detail paths", () => {
@@ -25,5 +30,9 @@ describe("afterAuthPath", () => {
     expect(afterAuthPath("//evil.example")).toBe("/app");
     expect(afterAuthPath(null)).toBe("/app");
     expect(afterAuthPath("/settings")).toBe("/app");
+  });
+
+  test("keeps the query string on an in-app destination", () => {
+    expect(afterAuthPath("/app/settings?emailToken=abc")).toBe("/app/settings?emailToken=abc");
   });
 });

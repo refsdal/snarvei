@@ -38,7 +38,9 @@ export const indexRoute = createRoute({
   }),
   beforeLoad: async ({ context, search }) => {
     const me = await context.queryClient.ensureQueryData(meQueryOptions());
-    if (me) throw redirect({ to: afterAuthPath(search.next), replace: true });
+    // `href`, not `to`: `afterAuthPath` may carry a query string (e.g. from an
+    // emailed settings link), and `to` does not split on "?".
+    if (me) throw redirect({ href: afterAuthPath(search.next), replace: true });
   },
   component: LandingPage,
 });

@@ -43,7 +43,9 @@ export function LandingPage() {
   const [forgotSent, setForgotSent] = useState(false);
   const resetDone = reset === "done";
 
-  const goToApp = () => navigate({ to: afterAuthPath(next), replace: true });
+  // `href`, not `to`: `afterAuthPath` may carry a query string (e.g. from an
+  // emailed settings link), and `to` does not split on "?".
+  const goToApp = () => navigate({ href: afterAuthPath(next), replace: true });
 
   const handleSignIn = async () => {
     setSubmitting("signin");
