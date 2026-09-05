@@ -12,3 +12,4 @@ package server
 //go:generate cp ../../openapi/snarvei.yaml internal/api/snarvei.yaml
 //go:generate oapi-codegen -config internal/api/gen/cfg-types.yaml ../../openapi/snarvei.yaml
 //go:generate oapi-codegen -config internal/api/gen/cfg-server.yaml ../../openapi/snarvei.yaml
+//go:generate sqlc generate
