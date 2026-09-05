@@ -1,10 +1,3 @@
-> **Migration in progress (2026-09).** Snarvei is moving from Cloudflare Workers to a
-> Go server with an embedded SPA, shipped as a container. The stack, routes and
-> operations described below are the OLD ones until phase 5 rewrites this file.
-> The design is `docs/superpowers/specs/2026-09-04-go-backend-migration-design.md`;
-> the current phase plan is under `docs/superpowers/plans/`. Backend: `apps/server`
-> (Go); frontend: `apps/frontend`; build: `scripts/build-artifacts.sh`.
-
 # Snarvei
 
 Snarvei is a multi-organization URL shortener and redirect management system built for teams that need control after a link has already been distributed.
@@ -58,7 +51,7 @@ The first version is intentionally focused.
 3. slug renames / aliases
 4. SSO/SAML
 5. scheduled activation/deactivation
-6. advanced analytics infrastructure beyond D1
+6. advanced analytics infrastructure
 
 ## Product Rules
 
@@ -96,123 +89,256 @@ These rules define how the system should behave.
 
 ## Architecture
 
-Snarvei is planned as a single full-stack Cloudflare Workers application.
+Snarvei is one Go binary (`apps/server`, stdlib `net/http`, no framework) that
+serves the API, the public redirect and the embedded SPA (`apps/frontend`,
+Vite + React + TanStack Router/Query) from a single process, backed by
+Postgres. Auth — sessions, sign-in/sign-up, two-factor, organizations — goes
+through [Limen](https://github.com/thecodearcher/limen), confined behind
+`internal/auth`.
 
-### Core Stack
+Route table:
 
-1. Cloudflare Workers
-2. Hono
-3. React
-4. Material UI
-5. Better Auth
-6. D1
-7. Drizzle ORM
-8. `@hono/zod-openapi`
-9. Scalar
-10. Vitest
-11. Playwright
+| Path | What |
+| --- | --- |
+| `/` | landing: sign in / sign up / forgot password |
+| `/reset-password` | password reset, public |
+| `/app` | organization picker (session required) |
+| `/app/invitations/{id}` | accept, reject or register through an invitation (public) |
+| `/app/settings` | profile, email, password, two-factor, sessions |
+| `/app/{org}/dashboard` | organization dashboard |
+| `/app/{org}/links` | links table |
+| `/app/{org}/links/{id}` | link details, history, analytics |
+| `/app/{org}/organization` | members, teams, invitations |
+| `/l/{slug}` | the public redirect |
+| `/api/*` | the application API (`/api/auth/*` is Limen's) |
+| `/healthz`, `/readyz` | liveness and readiness probes |
+| `/openapi.json`, `/scalar` | the API contract and its browsable reference |
+| `/images/profile/*` | profile images, streamed from storage |
+| `/robots.txt` | disallows everything |
 
-### Route Structure
+## Quick start
 
-1. Public redirects: `/l/:slug`
-2. Admin UI: `/app/*`
-3. Auth API: `/api/auth/*`
-4. Application API: `/api/*`
-5. OpenAPI document: `/openapi.json`
-6. Scalar API docs: `/scalar`
+Two containers, nothing to build:
 
-### Data Storage
+```sh
+curl -O https://raw.githubusercontent.com/refsdal/snarvei/main/docker-compose.selfhost.yml
 
-V1 uses D1 as the source of truth for:
-
-1. Better Auth tables
-2. links
-3. link target history
-4. click events
-
-This keeps the first version simple and testable while leaving room for more specialized analytics infrastructure later.
-
-## OpenAPI and Scalar
-
-The API should be described from code using `@hono/zod-openapi`.
-
-Goals:
-
-1. schema validation and documentation come from the same source
-2. the OpenAPI spec stays in sync with the implementation
-3. technical users can inspect and experiment with the API using Scalar
-
-The Scalar page should be public, but the API itself still requires valid authentication where applicable.
-
-## Testing Philosophy
-
-Testing is part of the product definition.
-
-Snarvei should include:
-
-1. unit tests for helpers, hashing, authorization, and domain logic
-2. Workers runtime integration tests for API routes and D1 interactions
-3. Playwright tests for real end-to-end workflows through the UI
-
-Critical workflows to test:
-
-1. sign up and sign in
-2. create organization
-3. create team
-4. invite member
-5. assign member to team
-6. create link
-7. follow `/l/:slug`
-8. edit redirect target
-9. view analytics
-10. delete link and verify data removal
-
-## Better Auth Table Naming
-
-Better Auth tables should use plural naming.
-
-For the Drizzle adapter, that means using `usePlural: true` so table names follow the plural convention such as:
-
-1. `users`
-2. `accounts`
-3. `sessions`
-4. and equivalent pluralized Better Auth tables
-
-## How Snarvei Is Intended To Be Used
-
-Typical flow:
-
-1. sign in
-2. create or join an organization
-3. create a Team
-4. create a Link for that Team
-5. distribute the short URL
-6. later update the destination if needed
-7. inspect analytics for that Link
-
-## Quickstart
-
-```
-pnpm install
-cp .dev.vars.example .dev.vars      # set AUTH_SECRET (>= 32 chars), APP_URL=http://localhost:5173
-pnpm db:migrate:local
-pnpm dev                            # http://localhost:5173
-pnpm test && pnpm lint && pnpm build
+AUTH_SECRET=$(openssl rand -base64 32) \
+  docker compose -f docker-compose.selfhost.yml up -d
 ```
 
-Cloudflare resources per environment (see `wrangler.jsonc`): a D1 database (`DB`), an R2 bucket for profile images (`PROFILE_IMAGES`; create with `wrangler r2 bucket create <name>`), a Rate Limiting binding, and the custom domain. Runtime vars: `APP_URL`, `APP_NAME`, `NODE_ENV`. Profile images are served by the Worker at `/images/profile/*`.
+This brings up Postgres and the app on <http://localhost:3000>, with profile
+images on a local volume (`STORAGE_DRIVER=fs`). The app migrates itself under
+a Postgres advisory lock before it starts serving, so there is no separate
+migration step to wait on.
 
-Operations (deploy/verify, rollback, recovery, secrets, common failures): see [`docs/runbook.md`](docs/runbook.md).
+To create the first account, start the container once with `OPEN_SIGNUP=1`
+(the default), open <http://localhost:3000>, and use the "Create account"
+form on the landing page. Close self-registration afterwards by setting
+`OPEN_SIGNUP=0` if the deployment is public; new members then join only
+through an invitation.
 
-## Development Notes
+## Self-hosting
 
-`AGENTS.md` holds the locked product/architecture decisions; preserve them unless the product direction changes explicitly. The production-readiness review and its follow-ups are tracked in GitHub issue #38.
+The image is `ghcr.io/refsdal/snarvei`, built for `linux/amd64` and
+`linux/arm64`. The tags are a pinning ladder:
 
-### Frontend/Go dev loop (Phase 4+)
+| Tag | Moves | Risk appetite |
+| --- | --- | --- |
+| `:0.1.0` | never | pin exactly, upgrade deliberately |
+| `:0.1` | with patch releases | fixes only |
+| `:0` | with minor releases | pre-1.0 minors may break — read release notes |
+| `:latest` | every release | living on the edge |
+| `:sha-<commit>` | never | byte-exact, provenance via cosign |
 
-Run the frontend (`apps/frontend`, Vite on `:5173`) against a locally built Go server (`apps/server`) instead of the container image:
+Inside it is a single static Go binary on a distroless `static` base: no
+shell, no libc, no package manager, nothing to `exec` into — just the CA
+bundle, tzdata and the `nonroot` user (uid 65532) maintained upstream. The
+SPA, the OpenAPI spec, the SQL migrations and the timezone database are all
+compiled into the binary.
 
-```bash
+### Configuration
+
+Environment variables only, validated once at startup — every problem is
+reported at once, so a misconfigured container crash-loops with a list
+rather than one restart per mistake. [`.env.example`](.env.example) is the
+complete contract: if a variable is not listed there, the app does not read
+it.
+
+Required:
+
+| Variable | Rule |
+| --- | --- |
+| `DATABASE_URL` | libpq connection string |
+| `APP_URL` | absolute http(s) origin — the address people actually type; `https://` makes cookies `Secure` |
+| `AUTH_SECRET` | at least 32 bytes (`openssl rand -base64 32`); changing it signs everyone out |
+| `STORAGE_DRIVER` | `fs` or `s3` |
+| `STORAGE_FS_PATH` | required when `STORAGE_DRIVER=fs` |
+| `S3_BUCKET`, `S3_ENDPOINT`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY` | required when `STORAGE_DRIVER=s3`; `S3_REGION` optional, default `auto` |
+
+Optional:
+
+| Variable | Default | Effect |
+| --- | --- | --- |
+| `PORT` | `3000` | listen port |
+| `APP_NAME` | `Snarvei` | display name, TOTP issuer, email sender name |
+| `TRUSTED_PROXY_HOPS` | `0` | proxies in front of the container — see "Behind a proxy" below |
+| `OPEN_SIGNUP` | `1` | `0` closes self-registration; accounts then exist only via invitation |
+| `IP_HASH_PEPPER` | derived from `AUTH_SECRET` | keeps click-analytics IP hashes stable across a secret rotation |
+| `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `EMAIL_FROM` | unset | all five or none — see "Email" below |
+| `MIGRATION_LOCK_KEY` | `1935762089` | advisory lock id for the startup migration; never change on a live system |
+| `LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error` |
+| `E2E_TEST_HOOKS` | `0` | `1` enables `GET/DELETE /api/_test/mail` for the Playwright suite; refused unless `APP_URL` is a loopback origin |
+
+The boot log names every optional subsystem that is off (email, S3).
+
+### Email
+
+Transactional mail (invitations, password reset, change-email confirmation)
+goes through SMTP. All five of `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`,
+`SMTP_PASSWORD` and `EMAIL_FROM` are required together; with none of them
+set, mail is dropped and a redacted `email.not_configured` line is logged —
+never the link itself. STARTTLS is used on port 587, implicit TLS on 465,
+and plain SMTP only when the host is loopback (for local testing against a
+mail-catcher). Provider rejections are logged as `email.send_failed`.
+
+### Behind a proxy
+
+Set `TRUSTED_PROXY_HOPS` to the number of proxies in front of the container.
+At `0` the peer address is trusted as the client IP and `X-Forwarded-For` is
+ignored entirely. Cloudflare proxied DNS in front of a direct origin is `1`;
+Cloudflare plus your own reverse proxy is `2`. When `TRUSTED_PROXY_HOPS > 0`,
+country codes for click analytics come from Cloudflare's `CF-IPCountry`
+header (a valid two-letter code only; `XX`/`T1` and an untrusted hop both
+mean no country). `APP_URL` must still be the address people actually type;
+HSTS is the reverse proxy's job.
+
+### Upgrading
+
+The default mode migrates itself under a Postgres advisory lock before it
+starts serving, so with a single instance, upgrading is pulling the new
+image and restarting it. For a rollout with more than one replica, run the
+migration as an explicit one-off first so the schema change lands before any
+replica depends on it:
+
+```sh
+docker run --rm -e DATABASE_URL=... [other required vars] \
+  ghcr.io/refsdal/snarvei:<new-version> migrate
+```
+
+This is safe to run alongside instances still on the old image, and safe to
+run more than once — the advisory lock means a `migrate` one-off and a
+starting default-mode container can never race each other. Migrations are
+forward-only; there is no down migration to run on rollback.
+
+### Backups
+
+Two volumes hold everything: `db-data` (Postgres) and `snarvei-data`
+(uploaded profile images, under `STORAGE_DRIVER=fs`). Back up both — an
+ordinary `pg_dump`/`pg_basebackup` schedule for Postgres, plus a copy of the
+`snarvei-data` volume. Restoring Postgres alone without the matching image
+volume leaves profile images pointing at files that no longer exist.
+
+Running `STORAGE_DRIVER=s3` instead removes the second volume from the
+picture: profile images live in the bucket, which almost always already has
+its own backup/versioning story, and only the Postgres volume needs the
+operator's attention.
+
+### Where your data lives
+
+Both stateful parts — Postgres and wherever profile images are stored — are
+entirely under the operator's control: pick the region when provisioning
+the database and the bucket or volume, and check that any backup target
+matches.
+
+## Versioning and images
+
+Versions are computed from [Conventional Commits](https://www.conventionalcommits.org)
+since the last `v*` tag by [svu](https://github.com/caarlos0/svu) — nobody
+types a version number. `feat` bumps the minor, `fix`/`perf` the patch,
+`!`/`BREAKING CHANGE` the major; `--v0` keeps a breaking change bumping the
+minor while the major is 0, so reaching 1.0 stays a deliberate act (the
+release workflow's `allow_major` input) rather than a side effect of a
+commit message.
+
+CI publishes a preview image for every pull request, after the image is
+smoke-tested and driven through Playwright:
+
+```
+ghcr.io/refsdal/snarvei:<next-version>-pr.<number>
+```
+
+**Merging to `main` is releasing.** Every merge with releasable commits
+(`feat`/`fix`/`perf`/breaking since the last tag) computes the version with
+svu, re-runs the full test suite on the merge commit, creates the tag, and
+hands everything downstream to [GoReleaser](https://goreleaser.com): binary
+archives with checksums and SPDX SBOMs on a GitHub Release with a generated
+changelog, the multi-arch image, and keyless [cosign](https://github.com/sigstore/cosign)
+signatures over both. A failed publish deletes the tag again, so a tag never
+points at a release that does not exist. Docs/chore/ci-only merges end green
+without releasing.
+
+**Image tags carry no `v`.** The git tag is `v0.1.0`; the image is
+`ghcr.io/refsdal/snarvei:0.1.0` — GoReleaser's version template strips the
+prefix. `docker pull …:v0.1.0` fails with `not found`.
+
+Building an image locally:
+
+```sh
+bash scripts/build-artifacts.sh   # SPA + both server binaries, natively -> dist/server
+docker build -t snarvei:dev .     # single arch, seconds — COPY-only
+bash scripts/build-image.sh       # both steps, multi-arch via buildx
+mise run snapshot                 # full GoReleaser dry run: archives, SBOMs, local image, no publish/signing
+```
+
+Nothing compiles inside Docker: the SPA and the server binaries are built
+natively (the SPA is embedded via `go:embed`), and the Dockerfile only
+`COPY`s the binary matching the target platform.
+
+## Running without Docker
+
+Every release ships the bare binaries too — the SPA, the OpenAPI spec, the
+migrations and tzdata are embedded, so one file plus Postgres is a complete
+deployment:
+
+```sh
+curl -LO https://github.com/refsdal/snarvei/releases/latest/download/snarvei_<version>_linux_amd64.tar.gz
+tar xzf snarvei_<version>_linux_amd64.tar.gz
+DATABASE_URL=... APP_URL=... AUTH_SECRET=... STORAGE_DRIVER=fs STORAGE_FS_PATH=/var/lib/snarvei \
+  ./snarvei    # migrates itself, then serves — same dispatch modes as the image
+```
+
+## Verifying a release
+
+Releases are signed with keyless cosign via GitHub's OIDC — the signature
+proves the artifacts came out of this repository's release workflow.
+
+```sh
+# 1. The checksum file's Sigstore bundle (covers every archive transitively):
+cosign verify-blob \
+  --bundle checksums.txt.sigstore.json \
+  --certificate-identity-regexp 'https://github.com/refsdal/snarvei/\.github/workflows/release\.yml@.*' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  checksums.txt
+
+# 2. Your download against the verified checksums:
+sha256sum --check --ignore-missing checksums.txt
+
+# 3. Or the container image directly:
+cosign verify ghcr.io/refsdal/snarvei:<version> \
+  --certificate-identity-regexp 'https://github.com/refsdal/snarvei/\.github/workflows/release\.yml@.*' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+```
+
+## Development
+
+Two toolchains — Go builds the server, Bun builds the SPA. [mise](https://mise.jdx.dev)
+pins both, plus the codegen tools `go generate` expects, in `.mise.toml`; CI
+installs from the same file.
+
+```sh
+mise install
+bun install
 docker compose -f docker-compose.test.yml up -d --wait   # Postgres on 127.0.0.1:55432, db snarvei_test
 
 DATABASE_URL="postgres://snarvei:snarvei@localhost:55432/snarvei_test?sslmode=disable" \
@@ -220,126 +346,92 @@ APP_URL=http://localhost:5173 \
 AUTH_SECRET="$(openssl rand -base64 32)" \
 OPEN_SIGNUP=1 \
 STORAGE_DRIVER=fs STORAGE_FS_PATH=/tmp/snarvei-dev \
-bun run dev:server                                        # go run ./cmd/snarvei, :3000
+bun run dev:server    # go run ./cmd/snarvei, :3000
 
-bun run dev                                                # Vite, :5173, proxies /api /l /healthz /readyz /openapi.json /scalar /images /robots.txt to :3000
+bun run dev            # Vite, :5173, proxies /api /l /healthz /readyz /openapi.json /scalar /images /robots.txt to :3000
 ```
 
-`APP_URL` must be exactly `http://localhost:5173` (not `127.0.0.1`) because Limen rejects non-GET auth requests whose `Origin` header does not match it. `bun run gen:client` regenerates `apps/frontend/src/lib/api-schema.d.ts` from `openapi/snarvei.yaml`; the generated file is committed and CI fails on drift.
+`APP_URL` must be exactly `http://localhost:5173` (not `127.0.0.1`), because
+Limen rejects non-GET auth requests whose `Origin` header does not match it.
 
-## Repository Conventions
+```sh
+mise run test       # Go (real Postgres, -p 1) + frontend unit tests
+mise run check      # biome + typecheck + goreleaser config
+mise run e2e        # Playwright against the real image (builds it if missing)
+mise run snapshot   # full GoReleaser dry run
+```
 
-1. Use `pnpm`.
-2. Prefer small, testable changes.
-3. Keep authorization logic centralized.
-4. Keep route validation and OpenAPI metadata close to route definitions.
-5. Treat tests as required, not optional.
+After editing `openapi/snarvei.yaml`, run `go generate ./...` from
+`apps/server` (regenerates the strict server, types and the embedded spec
+copy) and `bun run gen:client` from the root (regenerates
+`apps/frontend/src/lib/api-schema.d.ts`). Both outputs are committed; a Go
+test and a bun test each regenerate into a temp directory and diff against
+the committed files, so drift fails the suite rather than shipping silently.
 
-## Abuse Protection
+## API and Scalar
 
-1. Better Auth's rate limiter is enabled with D1-backed storage (`rate_limits` table) so limits are shared across Workers isolates. Sign-in, sign-up and two-factor endpoints use Better Auth's strict per-IP rules; other auth routes use the base rule configured in `src/worker/lib/auth.ts`.
-2. A Workers Rate Limiting binding (`RATE_LIMIT` in `wrangler.jsonc`) additionally limits `/l/*` redirects and `/api/auth/*` per client IP at the edge (429 + `Retry-After`).
-3. Client IPs are read from `cf-connecting-ip` only; `x-forwarded-for` is ignored because it is spoofable.
+The API is spec-first: [`openapi/snarvei.yaml`](openapi/snarvei.yaml) is
+hand-written and authoritative. oapi-codegen generates the Go strict server
+and types from it, kin-openapi validates every request against the same
+spec at runtime, and openapi-typescript generates the SPA's client types.
+The embedded spec is served at `/openapi.json`; a public
+[Scalar](https://scalar.com) reference reads it at `/scalar`.
 
-## Observability
+## Repository layout
 
-1. The Worker logs one JSON line per event (`time`, `level`, `event`, plus fields such as `rayId`, `userId`, `path`) via `src/worker/lib/log.ts`; unexpected errors are logged as `request.error` and masked in the response. Never log secrets or links.
-2. `GET /api/health` runs a real D1 query and returns `{ ok, service, version, checks }` with `200`, or `503` + `ok: false` when a check fails (`Cache-Control: no-store`). Point an uptime monitor at it. `version` is the git SHA baked in at build time (`GITHUB_SHA` in CI; `dev` locally), overridable with an `APP_VERSION` var.
-3. Workers Logs are enabled in `wrangler.jsonc` (`observability.enabled`); filter by `event` (e.g. `env.invalid`, `email.not_configured`, `health.degraded`).
+```
+openapi/snarvei.yaml              the API contract — hand-written, single source of truth
+apps/server/                      Go module github.com/refsdal/snarvei/server
+  cmd/snarvei/                    composition root + dispatch table (default, server, migrate, healthcheck)
+  internal/
+    api/                          handlers implementing the oapi-codegen strict server, gen/ (committed)
+    auth/                         the ONLY package that imports Limen, behind auth.Service
+    authz/                        pure role/team rules, no I/O
+    clientip/                     trusted-proxy address extraction, country, keyed IP hashing
+    config/                       environment parsing, every error reported at once
+    db/                           pgxpool, goose migrations (embedded), sqlc queries and gen/
+    email/                        Sender interface, SMTP driver, no-op driver, templates
+    storage/                      storage port; fs and s3 drivers
+    ratelimit/                    Postgres fixed-window rate limiter
+    redirect/                     GET /l/{slug}; async click recorder with drain on shutdown
+    links/                        pure slug/target-URL rules, no I/O
+    web/                          go:embed dist/; security headers; SPA fallback; scalar page
+    testrig/                      real-Postgres harness shared by every Go test package
+apps/frontend/                    Vite + React + TanStack Router/Query + openapi-fetch
+  src/router.tsx                  the route tree
+  src/lib/api-schema.d.ts         generated by `bun run gen:client` (committed)
+  src/routes/...                  one directory per screen
+e2e/                              Playwright suite, run against the real image
+scripts/                          build-artifacts.sh, build-image.sh, e2e-stack.sh, embed-overlay helpers
+docker/data-skel/                 /data mountpoint owned by uid 65532
+docs/runbook.md                   operations
+.goreleaser.yaml                  archives, checksums, SBOMs, cosign, ghcr.io images, changelog
+.mise.toml                        toolchain pins and tasks (test, check, artifacts, image, snapshot, e2e)
+.env.example                      the complete configuration contract
+docker-compose.yml                contributors: builds the image from source
+docker-compose.selfhost.yml       operators: pulls ghcr.io/refsdal/snarvei
+docker-compose.test.yml           Postgres on 55432 for the Go suite
+.github/workflows/                test.yml (reusable gate), ci.yml (PRs), release.yml (push to main)
+```
 
 ## CI/CD
 
-GitHub Actions is used for CI/CD.
+Every pull request runs `test.yml` (lint, typecheck, `goreleaser check`, the
+Go suite against a real Postgres service, and the frontend unit tests), then
+`ci.yml` builds the image once from natively-built artifacts, smoke-tests it
+with plain `curl`, runs the Playwright suite against it, and — for PRs from
+this repository — pushes it as a preview image tagged
+`<next-version>-pr.<number>`.
 
-Current pipeline behavior:
+Every push to `main` re-runs `test.yml` on the merge commit, then
+`release.yml` computes the next version with svu; when there is nothing
+releasable the run ends green, otherwise it tags, runs
+`goreleaser release`, and deletes the tag again if publishing fails. Nothing
+in the pipeline rolls anything out — deployment (`snarvei migrate` or the
+default mode, then pointing the running deployment at the new tag) is the
+operator's.
 
-1. On every pull request and push, run lint, typecheck/build, Vitest, and Playwright.
-2. When CI succeeds for a push to `main`, the `Deploy Dev` workflow (triggered via `workflow_run`) deploys the `dev` Cloudflare Worker environment. A red CI run never deploys.
-3. Production deployment is a manual GitHub Actions workflow; it refuses to deploy a commit that has no successful `Validate` check run.
-4. Before each deploy, list and apply remote D1 migrations. Deploy runs are queued, never cancelled mid-flight.
-5. `main` is protected by a ruleset: changes land via pull request with a green `Validate` check; force-pushes are blocked.
+## License
 
-Deployment credentials are configured in GitHub:
-
-1. Secrets:
-   `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`
-
-### Creating the Cloudflare API token
-
-The deploy workflows use Wrangler to:
-
-1. deploy the Worker
-2. apply remote D1 migrations
-
-You can use either:
-
-1. a user API token
-2. an account-owned API token
-
-For GitHub Actions, prefer an account-owned token so deployments are not tied to a specific user account.
-
-Create the token in Cloudflare:
-
-1. Go to Cloudflare Dashboard.
-2. For an account-owned token, go to `Manage Account` -> `API Tokens`.
-3. For a user token, go to your profile -> `API Tokens`.
-4. Select `Create Token`.
-5. Choose `Create Custom Token`.
-6. Name it something like `snarvei-github-actions`.
-7. Add these account permissions:
-   `Workers Scripts: Edit`
-   `D1: Edit`
-   (optional, only if you declare `routes` with `custom_domain` in `wrangler.jsonc`: zone permissions `Workers Routes: Edit` and `DNS: Edit` for the zone)
-8. Restrict the token to the Cloudflare account that owns Snarvei.
-9. Optionally add an expiry date or other restrictions.
-10. Create the token and copy it immediately.
-
-Add the token to GitHub Actions as:
-
-1. `CLOUDFLARE_API_TOKEN`
-2. `CLOUDFLARE_ACCOUNT_ID`
-
-Runtime environment values are configured in `wrangler.jsonc`:
-
-1. production at the top level
-2. `dev` under `env.dev`
-
-When using the Cloudflare Vite plugin, deployment environment is selected at build time via `CLOUDFLARE_ENV`, not by `wrangler deploy --env ...` alone.
-
-Examples:
-
-1. dev build and deploy:
-   `CLOUDFLARE_ENV=dev pnpm build && CLOUDFLARE_ENV=dev pnpm exec wrangler deploy`
-2. production build and deploy:
-   `pnpm build && pnpm exec wrangler deploy`
-
-Production auth also requires the Worker secret:
-
-1. `AUTH_SECRET`
-
-Transactional email (organization invitations, email verification, password reset, change-email confirmation) is sent through [Cloudflare Email Service](https://developers.cloudflare.com/email-service/) and needs:
-
-1. the `send_email` binding `EMAIL` (declared in `wrangler.jsonc` for each environment)
-2. `EMAIL_FROM` (var in `wrangler.jsonc`, e.g. `Snarvei <no-reply@your-domain>`) on a domain you have onboarded under Compute → Email Service → Email Sending (Workers Paid; the zone must use Cloudflare DNS, the SPF/DKIM/DMARC records are added for you)
-
-Without them, messages are dropped and a redacted `email.not_configured` warning is logged — never the link itself; provider rejections are logged as `email.send_failed` with Cloudflare's error code. Locally the binding is simulated (messages are logged and written to miniflare's temp dir); set `EMAIL_DEV_LOG=true` in `.dev.vars` to log full messages instead.
-
-Users who forget their password use "Forgot password?" on the landing page; the emailed link lands on `/reset-password`, and a successful reset signs the user out everywhere.
-
-See `.github/workflows/README.md` for the exact setup expected by the workflow.
-
-## Future Directions
-
-Likely follow-up features after V1:
-
-1. custom domains for enterprise customers
-2. SSO/SAML
-3. richer analytics views and aggregations
-4. scheduled activation/deactivation
-5. more granular Team roles if needed
-
-## Status
-
-This project is currently in its initial implementation phase.
-
-The architectural foundation is defined. The codebase is expected to grow from these decisions.
+[AGPL-3.0](LICENSE). Self-host it, fork it, improve it — and if you offer a
+modified Snarvei to others as a service, share your changes the same way.

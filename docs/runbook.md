@@ -1,76 +1,120 @@
-> **Migration in progress (2026-09).** Snarvei is moving from Cloudflare Workers to a
-> Go server with an embedded SPA, shipped as a container. The stack, routes and
-> operations described below are the OLD ones until phase 5 rewrites this file.
-> The design is `docs/superpowers/specs/2026-09-04-go-backend-migration-design.md`;
-> the current phase plan is under `docs/superpowers/plans/`. Backend: `apps/server`
-> (Go); frontend: `apps/frontend`; build: `scripts/build-artifacts.sh`.
-
 # Snarvei operations runbook
 
-Single-operator runbook for the dev and production Cloudflare Workers environments. Keep it short and accurate; update it in the same PR as the behaviour it describes.
+Single-operator runbook for wherever the container runs. Keep it short and
+accurate; update it in the same change as the behaviour it describes.
 
-## Environments
+## Where it runs
 
-|        | Production                                           | Dev                                      |
-| ------ | ---------------------------------------------------- | ---------------------------------------- |
-| Worker | `snarvei`                                            | `snarvei-dev` (`--env dev`)              |
-| URL    | `https://snarvei.ros-nett.com`                       | `https://snarvei-dev.ros-nett.com`       |
-| D1     | `snarvei`                                            | `snarvei-dev`                            |
-| R2     | `snarvei-profile-images`                             | `snarvei-dev-profile-images`             |
-| Deploy | manual `Deploy Production` workflow (ref + approval) | automatic after a green CI run on `main` |
+Snarvei ships as one image, `ghcr.io/refsdal/snarvei`, tagged
+`:0.1.0` (never moves), `:0.1` (patches), `:0` (minors), `:latest` and
+`:sha-<commit>` — see `README.md` → "Self-hosting" for the full ladder. It is
+one process: a single static Go binary that serves the API, the redirect and
+the SPA together, behind whatever container runtime and reverse proxy the
+operator already has. There is no separate worker, cron or landing mode —
+Snarvei has no scheduled work.
 
-Both are defined in `wrangler.jsonc` (top level = production, `env.dev` = dev). The Worker is bound to its custom domain only (`workers_dev` and `preview_urls` are off).
+- `GET /healthz` — liveness. Constructs nothing, touches nothing (a slow
+  database must never turn into a restart loop). `200 {"ok":true,"service":"snarvei","version":"<tag>"}`.
+- `GET /readyz` — readiness. Runs `SELECT 1` against Postgres. `200
+  {"ok":true}` or `503 {"ok":false,"error":"..."}`. Both probes send
+  `Cache-Control: no-store`.
+- `PORT` (default `3000`) is the only thing that changes what port the
+  process listens on; there is no separate metrics or admin port.
 
-## Secrets and variables
+## Configuration and secrets
 
-Set with `pnpm exec wrangler secret put <NAME>` (add `--env dev` for dev). The Worker refuses to serve (HTTP 500 `Server misconfigured`, log event `env.invalid`) when required ones are missing.
+Every setting is an environment variable, validated once at startup with
+every problem reported at once — a misconfigured container crash-loops with
+a list, not one restart per mistake. [`.env.example`](../.env.example) is
+the complete contract; `README.md` → "Configuration" has the same table with
+defaults and notes.
 
-| Name                              | Required                               | Purpose                                                                                                                                                                                 |
-| --------------------------------- | -------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `AUTH_SECRET`                     | yes (>= 32 chars)                      | Better Auth session signing; default pepper for IP hashing                                                                                                                              |
-| `IP_HASH_PEPPER`                  | recommended                            | Dedicated pepper for visitor IP hashing (rotating `AUTH_SECRET` then keeps analytics stable)                                                                                            |
-| `EMAIL` binding + `EMAIL_FROM`    | yes for invitations/verification/reset | Transactional email via Cloudflare Email Service (`send_email` binding in `wrangler.jsonc`, `EMAIL_FROM` var); without them messages are dropped with an `email.not_configured` warning |
-| `APP_URL`, `APP_NAME`, `NODE_ENV` | vars in `wrangler.jsonc`               | Public origin, display name, production guards                                                                                                                                          |
-| `APP_VERSION`                     | optional var                           | Overrides the build-time git SHA reported by `/api/health`                                                                                                                              |
-
-Rotation: Better Auth accepts a `secrets` array for overlapping rotations (see its docs); rotating `AUTH_SECRET` signs everyone out. Rotate the Cloudflare API token in GitHub Actions secrets (`CLOUDFLARE_API_TOKEN`).
+Rotation: **rotating `AUTH_SECRET` signs everyone out** (it signs sessions)
+**and changes every click-analytics IP hash** unless a dedicated
+`IP_HASH_PEPPER` is also set — set `IP_HASH_PEPPER` before the first
+rotation if stable hashes across a secret rotation matter to you.
 
 ## Deploy and verify
 
-1. Merge to `main` → CI (`Validate`) → `Deploy Dev` runs only on success (workflow_run).
-2. Production: run the `Deploy Production` workflow with the ref to deploy; it refuses refs without a successful `Validate` check, lists pending D1 migrations, applies them, then deploys.
-3. Verify: `curl -s https://<host>/api/health` → `{"ok":true,...,"version":"<git sha>","checks":{"database":"ok"}}`; open `/scalar`; sign in and follow a short link (`/l/<slug>` → 302 with `Cache-Control: no-store`).
+1. Migrate, then point the deployment at the new tag. A single instance can
+   rely on the default dispatch mode, which migrates itself under a
+   Postgres advisory lock before it starts serving. With more than one
+   replica, run the migration as an explicit one-off first:
 
-## Rollback and recovery
+   ```sh
+   docker run --rm -e DATABASE_URL=... [other required vars] \
+     ghcr.io/refsdal/snarvei:<tag> migrate
+   ```
 
-- Worker: `pnpm exec wrangler deployments list [--env dev]` → `pnpm exec wrangler rollback <version-id> [--env dev]`. Code rollback does **not** roll back migrations — migrations are additive/backward compatible by policy (see `AGENTS.md` → Database Migrations).
-- Database: D1 Time Travel — `pnpm exec wrangler d1 time-travel info DB --remote [--env dev]`, then `... restore DB --remote --timestamp <iso>` (30-day window; writes after the bookmark are lost). Take a snapshot before risky production migrations: `pnpm exec wrangler d1 export DB --remote --output backup.sql`.
-- R2 (profile images): no versioning; objects are only deleted when a user replaces/removes their image. Orphans are harmless.
+2. Verify:
+
+   ```sh
+   curl -s https://<host>/healthz   # {"ok":true,"service":"snarvei","version":"<tag>"}
+   ```
+
+   Confirm `version` matches the tag just deployed. Open `/scalar` and
+   confirm the API reference loads. Follow a real short link
+   (`/l/<slug>`) and confirm a `302` (or the link's configured status) with
+   `Cache-Control: no-store`.
+
+## Rollback
+
+- Point the deployment back at the previous image tag. **Migrations are
+  forward-only** — there is no down migration to run, so a code rollback
+  does not undo a schema change. Plan schema changes expand/contract
+  (`AGENTS.md` → "Migrations Under Goose") precisely so an old binary keeps
+  working against a newer schema during a rollback window.
+- Postgres backup and restore is the operator's responsibility — an
+  ordinary `pg_dump`/`pg_basebackup` schedule against whatever runs the
+  database. Snarvei does not manage or trigger backups itself.
+- Profile images live on the `snarvei-data` volume (or the configured S3
+  bucket). Back it up alongside Postgres — restoring one without the other
+  leaves profile images pointing at files that no longer exist, or a
+  database with no matching images.
 
 ## Common failures
 
-| Symptom                                  | Log event / check                               | Action                                                                                                                                                                                                        |
-| ---------------------------------------- | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Every request 500 `Server misconfigured` | `env.invalid`                                   | A required secret/var is missing → set it, redeploy not needed                                                                                                                                                |
-| `/api/health` 503                        | `health.degraded` (`checks.database`)           | D1 unreachable/broken → Cloudflare status, D1 dashboard, Time Travel if corrupted                                                                                                                             |
-| Invitations / reset emails never arrive  | `email.not_configured` / `email.send_failed`    | Onboard the `EMAIL_FROM` domain under Compute → Email Service → Email Sending (Workers Paid); `E_SENDER_NOT_VERIFIED` = domain not onboarded / wrong `EMAIL_FROM`; daily/rate limit codes are Cloudflare-side |
-| Users get 429                            | `Retry-After` header                            | Expected under abuse; limits are in `src/worker/lib/auth.ts` (Better Auth) and `wrangler.jsonc` (`RATE_LIMIT` binding)                                                                                        |
-| Redirect works but no analytics          | `click.record_failed`                           | D1 write failure/budget → check D1 metrics & limits                                                                                                                                                           |
-| Unexpected 500 on an API route           | `request.error` (has `rayId`, `userId`, `path`) | Inspect the stack in Workers Logs; correlate with `version`                                                                                                                                                   |
+| Symptom | Log event | Action |
+| --- | --- | --- |
+| Container exits immediately with a list of problems | (stderr, before logging starts) | A required variable is missing or invalid; every problem is printed at once — fix them all, then restart |
+| `/readyz` returns 503 | (the `{"ok":false}` body, no dedicated log event) | Postgres unreachable or broken — check the database, its network path, and its own logs |
+| Invitations / reset / change-email mail never arrives | `email.not_configured` (all five `SMTP_*`/`EMAIL_FROM` not set) or `email.send_failed` (provider rejected it) | Set all five SMTP variables together, or check the SMTP provider's error in the log line |
+| Users get `429` | (a `Retry-After` header on the response) | Expected under abuse. `/l/*` and a handful of write endpoints are rate-limited per hashed IP by Snarvei's own Postgres-backed limiter, safe across replicas; `/api/auth/*` sign-in/sign-up/two-factor limits are Limen's own and — for now — in-memory per replica, so the effective limit scales with replica count |
+| Redirect works but no click recorded | `click.record_failed` | The async click write failed (link id and slug are in the log line) — check Postgres health and capacity |
+| Server logs `click.drain_timeout` on shutdown | `click.drain_timeout` | The in-flight click recorder did not finish within its 5 s shutdown budget — a handful of clicks near a restart can be lost, matching the previous best-effort guarantee; frequent occurrences point at a slow or overloaded database |
+| Unexpected `500` on an API route | `request.error` (has `requestId`, `userId`, `path`) | Inspect the stack in the container logs; correlate with the `version` reported by `/healthz` |
 
 ## Where to look
 
-- Workers Logs (observability is enabled in `wrangler.jsonc`) — filter by `event`.
-- Cloudflare dashboard: Workers & Pages → snarvei / snarvei-dev (requests, errors, CPU), D1 (reads/writes, storage), R2.
-- GitHub Actions for deploy history; `/api/health` `version` tells you which commit is live.
+- Container logs: one JSON line per event on stdout (`time`, `level`,
+  `event`, plus `requestId`/`userId`/`path`/`status`/`durationMs` where
+  relevant). Filter by `event` for any of the names above.
+- `/healthz` reports the running `version` — compare it against the tag you
+  expect to be deployed.
+- GitHub Actions (`.github/workflows/release.yml`) for the release history:
+  which commits shipped in which version, and the GitHub Release page for
+  the changelog, checksums and cosign signatures.
 
 ## Local development quickstart
 
+```sh
+mise install
+bun install
+docker compose -f docker-compose.test.yml up -d --wait   # Postgres on 127.0.0.1:55432, db snarvei_test
+
+DATABASE_URL="postgres://snarvei:snarvei@localhost:55432/snarvei_test?sslmode=disable" \
+APP_URL=http://localhost:5173 \
+AUTH_SECRET="$(openssl rand -base64 32)" \
+OPEN_SIGNUP=1 \
+STORAGE_DRIVER=fs STORAGE_FS_PATH=/tmp/snarvei-dev \
+bun run dev:server    # go run ./cmd/snarvei, :3000
+
+bun run dev            # Vite, :5173, proxies the server-owned paths to :3000
+
+mise run test   # Go (real Postgres) + frontend unit tests
+mise run check  # lint, typecheck, goreleaser config
+mise run e2e    # Playwright against the real image
 ```
-pnpm install
-cp .dev.vars.example .dev.vars      # set AUTH_SECRET (>= 32 chars), APP_URL=http://localhost:5173
-pnpm db:migrate:local
-pnpm dev                            # Vite + Workers runtime on http://localhost:5173
-pnpm test                           # unit + integration (applies real migrations to an isolated D1)
-pnpm test:e2e                       # Playwright (needs: pnpm exec playwright install --with-deps chromium)
-```
+
+See `README.md` → "Development" for the full explanation, and
+`CONTRIBUTING.md` for the contributor workflow.

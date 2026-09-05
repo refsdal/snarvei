@@ -1,270 +1,202 @@
-> **Migration in progress (2026-09).** Snarvei is moving from Cloudflare Workers to a
-> Go server with an embedded SPA, shipped as a container. The stack, routes and
-> operations described below are the OLD ones until phase 5 rewrites this file.
-> The design is `docs/superpowers/specs/2026-09-04-go-backend-migration-design.md`;
-> the current phase plan is under `docs/superpowers/plans/`. Backend: `apps/server`
-> (Go); frontend: `apps/frontend`; build: `scripts/build-artifacts.sh`. Phase 2
-> (auth, organizations, teams, invitations, profile, email, storage) is
-> implemented; see the OpenAPI spec for the live routes. Phase 3 (links, the
-> /l/{slug} redirect with click analytics, /openapi.json and /scalar) is
-> implemented. Phase 4 (frontend on TanStack Router/Query, generated client,
-> limen-auth; passkeys removed) is implemented; `bun run gen:client`
-> regenerates `apps/frontend/src/lib/api-schema.d.ts` after spec changes.
-
 # AGENTS.md
 
-This file is the execution brief for future AI agents and contributors working on `snarvei`.
+This file is the execution brief for future AI agents and contributors
+working on `snarvei` — the contributor deep-dive; `README.md` is for users.
 
 ## Product Summary
 
-Snarvei is an organization-aware URL shortener and redirect management system.
+Snarvei is an organization-aware URL shortener and redirect management
+system.
 
 Core goals:
 
 1. Create short links under a shared short domain.
-2. Redirect users through `GET /l/:slug`.
-3. Allow redirect targets to be changed after the short URL has already been distributed.
+2. Redirect users through `GET /l/{slug}`.
+3. Allow redirect targets to be changed after the short URL has already
+   been distributed.
 4. Track click analytics per link.
-5. Support multiple organizations with invitations and organization membership.
+5. Support multiple organizations with invitations and organization
+   membership.
 6. Use Teams as the only internal permission boundary in V1.
 
-## Locked V1 Decisions
+## Locked Decisions
 
-These decisions are already made and should be treated as defaults unless the user explicitly changes them.
+These decisions are made and should be treated as defaults unless the user
+explicitly changes them. They come from
+`docs/superpowers/specs/2026-09-04-go-backend-migration-design.md`
+("Decisions taken during brainstorming").
 
-### Stack
+| Topic | Decision |
+| --- | --- |
+| Backend | Go, stdlib `net/http`, no framework. One static, CGO-free binary. |
+| Database | Postgres via pgx v5 + sqlc + goose. No SQLite driver. |
+| Auth | [Limen](https://github.com/thecodearcher/limen), confined behind `internal/auth`. Teams are Snarvei's own tables, not a Limen plugin. |
+| Frontend | React + TanStack Router/Query, an `openapi-fetch` client generated from the spec, `limen-auth` for the auth client. |
+| JS toolchain | bun + biome. No pnpm, ESLint or Prettier. |
+| Email | SMTP. Absent configuration drops mail with a redacted log line, never a stub inbox. |
+| Storage | A `storage.Storage` port with `fs` and `s3` drivers for profile images. |
+| Image | Distroless `static` (nonroot), built natively — nothing compiles inside Docker. |
+| Releases | Merging to `main` is releasing: svu computes the version from Conventional Commits, GoReleaser publishes. |
+| License | AGPL-3.0-only. |
+| Networking | Behind a trusted proxy via `TRUSTED_PROXY_HOPS`; `X-Forwarded-For` is never trusted at hop 0. |
 
-1. Cloudflare Workers
-2. Hono for the API and redirect handling
-3. React for the admin UI
-4. Material UI for the component system
-5. Better Auth for authentication and organization management
-6. D1 as the primary data store
-7. Drizzle ORM for schema and database access
-8. `@hono/zod-openapi` + Zod for request/response validation and OpenAPI generation
-9. Scalar for the API reference UI
-10. Vitest with `@cloudflare/vitest-pool-workers` for unit/integration tests
-11. Playwright for end-to-end UI tests
-12. `pnpm` as package manager
+## The Deps Rule
 
-### Routing
+`internal/api` never reads the environment or constructs a collaborator.
+Every handler is a method on `api.Deps` (`apps/server/internal/api/api.go`),
+a plain struct holding the pool, the sqlc queries, the auth service,
+storage, email, the rate limiter, the IP hasher and the click recorder.
+`cmd/snarvei` builds one `Deps` at startup and hands it to
+`api.NewHandler(deps)`, which panics immediately if a required collaborator
+is `nil` — a missing dependency is a boot-time crash, not a runtime `nil`
+pointer three requests later. Tests build a `Deps` the same way, through
+`internal/testrig`, against a real Postgres database rather than a mock.
 
-1. Public redirect route is `GET /l/:slug`.
-2. Admin UI lives under `/app/*`.
-3. Auth routes live under `/api/auth/*`.
-4. App API routes live under `/api/*`.
-5. OpenAPI document should be exposed at `/openapi.json`.
-6. Scalar API reference should be exposed at `/scalar`.
+## The Limen Boundary
 
-### Authentication and Authorization
+`internal/auth` is the only package that imports Limen. It exposes a small
+`Service` interface (session lookup, organizations, invitations, member
+roles, password verification) — nothing else in the module names a Limen
+type.
 
-1. V1 auth is email/password, with optional TOTP two-factor, passkeys, change-email and forgot-password (landing page → Better Auth `request-password-reset` → emailed link → public `/reset-password` page; all shipped and tested; keep them). No SSO/SAML. Transactional email goes through the Cloudflare Email Service `send_email` binding (`EMAIL`) + `EMAIL_FROM` var (see `src/worker/lib/email.ts`).
-2. Any authenticated user may create an organization in V1.
-3. Better Auth organizations are enabled.
-4. Better Auth teams are enabled.
-5. Team is the only Team-level permission concept in V1.
-6. There are no Team sub-roles in V1.
-7. If a user is a member of a Team, they have full access to links in that Team.
-8. Org `owner` and `admin` can access all Teams in the org.
-9. Org `member` can only access Teams they explicitly belong to.
-10. Invitations carry an optional Team; invitees accept at `/app/invitations/:id`; owners/admins manage Team membership from the Organization page (`GET /api/teams/{teamId}/members` + Better Auth add/remove-team-member). Roles may be comma-joined strings — always go through `parseRoles`/`isOrgAdmin` in `src/worker/middleware/guards.ts`.
+Limen's own HTTP surface is an allowlist, not a blocklist:
+`apps/server/internal/auth/routes.go` lists every route id the pinned
+plugins can mount (`knownRouteIDs`) and computes which ones stay enabled
+(`allowedRouteIDs`); everything else is passed to
+`limen.WithHTTPDisabledPaths`. A test probes the concrete paths so a route
+added upstream can never become silently reachable. Disabled on purpose:
+session listing/revocation and every organization/invitation route (Snarvei
+re-implements these as its own API so invitations can carry a team and
+authorization stays in one place), `usernames-check`, `passwords-set`, and
+email verification.
 
-### Links and Analytics
+Sign-up is gated by `OPEN_SIGNUP`; when it is `0`,
+`POST /api/auth/signup/credential` is disabled and the only way to create an
+account is `POST /api/invitations/{id}/register`, which is itself
+rate-limited and marked `tierPublicCapture` (public, but sets a session
+cookie on success). Limen's own database-backed rate limiter on
+`/api/auth/*` is, in practice, in-memory per replica for now (its Postgres
+store cannot hold pgx's int64 counters as-is); `/l/*` and a handful of write
+endpoints (`POST /api/invitations/{id}/register`, `POST /api/me/email`,
+`POST /api/links`) go through Snarvei's own Postgres-backed
+`internal/ratelimit` instead, which is safe across replicas.
 
-1. Slugs are generated by default; a custom (vanity) slug may be supplied at creation (`POST /api/links` `slug`: trimmed, lower-cased, `^[a-z0-9]+(?:-[a-z0-9]+)*$`, 3–64 chars, see `CustomSlugSchema`). A taken custom slug is a `409`; generated slugs retry on collision. Slugs never change after creation (no rename on update).
-2. Slugs are globally unique.
-3. Generated slugs must not reveal the owning organization; a custom slug is the team's own choice.
-4. Every Link belongs to exactly one Team.
-5. Default redirect status is `302`.
-6. Support `301`, `302`, and `307`.
-7. Link target changes must be recorded in history.
-8. Click analytics should store hashed IP only, never raw IP. Other click fields are minimised too: only `utm_*` query parameters are kept, the referer is stored without query string/fragment/credentials, and the user agent is capped at 256 characters (see `src/worker/lib/click-privacy.ts`).
-9. Click analytics should retain data for as long as the Link exists.
-10. Deleting a Link should also delete its analytics and target history.
-11. Activation/deactivation is manual in V1.
+## Spec-First Workflow
 
-### Better Auth Schema
+`openapi/snarvei.yaml` is hand-written and authoritative. Editing it means
+running, from the repo root:
 
-1. Better Auth tables should use plural naming.
-2. For Drizzle adapter setup, use `usePlural: true`.
+```sh
+cd apps/server && go generate ./...   # oapi-codegen: strict server + types; copies the spec for go:embed
+bun run gen:client                    # openapi-typescript: apps/frontend/src/lib/api-schema.d.ts
+```
 
-## Recommended Data Model
+Both outputs are committed and never produced in CI or in the image. A Go
+test regenerates into a temp directory and diffs it against the committed
+`internal/api/gen` output (and the embedded spec copy); a bun test does the
+same for `api-schema.d.ts`. Drift fails the suite.
 
-Better Auth managed tables will cover users, sessions, accounts, organizations, memberships, invitations, teams, and team memberships.
+Every spec operation must also appear in `operationTiers`
+(`apps/server/internal/api/tiers.go`), which names the middleware chain
+(public, session, org, org-admin, team, team-admin, or one of the
+rate-limited variants) the operation runs behind. `assertTierCoverage` walks
+the spec at `NewHandler` time and panics on any operation missing an entry —
+a new endpoint can never ship unguarded by accident.
 
-Application-specific tables should include:
+## Migrations Under Goose
 
-1. `links`
-2. `link_target_history`
-3. `click_events`
-
-Suggested app-level fields:
-
-### `links`
-
-1. `id`
-2. `organization_id`
-3. `team_id`
-4. `slug` unique
-5. `target_url`
-6. `redirect_status`
-7. `is_active`
-8. `title` nullable
-9. `description` nullable
-10. `created_by`
-11. `updated_by`
-12. `created_at`
-13. `updated_at`
-
-### `link_target_history`
-
-1. `id`
-2. `link_id`
-3. `old_target_url`
-4. `new_target_url`
-5. `changed_by`
-6. `changed_at`
-
-### `click_events`
-
-1. `id`
-2. `link_id`
-3. `clicked_at`
-4. `ip_hash`
-5. `user_agent`
-6. `referer`
-7. `country`
-8. `region` nullable
-9. `city` nullable
-10. `colo` nullable
-11. `asn` nullable
-12. `host`
-13. `path`
-14. `query_string` nullable
-15. `redirect_status_used`
+Goose migrations live in `apps/server/internal/db/migrations`, embedded in
+the binary, and are applied either by the default dispatch mode (under
+Postgres advisory lock `MIGRATION_LOCK_KEY`) or by `snarvei migrate`.
+Migrations are forward-only and follow expand/contract: add first, ship code
+that works with both shapes, drop only once nothing depends on the old one.
+sqlc queries live in `apps/server/internal/db/queries/*.sql`; `go generate`
+regenerates `internal/db/gen`, which is committed and drift-guarded the same
+way as the API code.
 
 ## Authorization Rules
 
-Keep authorization centralized in helpers or middleware, not spread ad hoc across handlers.
+Keep authorization centralized in `internal/authz` (pure functions, no I/O,
+unit-tested) — never spread ad hoc across handlers.
 
-Recommended logic:
+1. Org `owner` and `admin` can see and mutate every Team and Link in the
+   organization.
+2. Org `member` can see and mutate only Links in Teams they belong to.
+3. A Link mutation always checks both the caller's org membership and the
+   Team's ownership of the Link.
+4. Only `owner`/`admin` create Teams, manage Team membership, invite, or
+   cancel invitations.
+5. An owner cannot be demoted or removed by this API — there is no role
+   management endpoint in V1.
 
-1. If org role is `owner` or `admin`, allow access to all Teams and Links in that organization.
-2. Otherwise, require explicit Team membership for the Team that owns the Link.
-3. A Link mutation must always validate both org access and Team ownership.
+Every sqlc query on `links`, `link_target_history`, `click_events`, `teams`
+and `team_members` scopes on `organization_id`, directly or through a join
+on the link's or team's org, so cross-org access is structurally impossible
+rather than left to a handler to remember.
 
-## API Contract Guidance
+## Redirect and Analytics Privacy
 
-Use `@hono/zod-openapi` for all app routes.
+`GET /l/{slug}` runs outside the session middleware: rate limit, look up the
+active link, respond with the redirect (`Cache-Control: no-store`), then
+hand a click event to an async recorder. A click row stores a keyed IP hash
+(never a raw address), `utm_*` query parameters only, the referer reduced to
+origin + path, and a user agent capped at 256 characters — never the full
+query string, fragment or credentials. On shutdown the server stops
+accepting, drains in-flight requests, then waits up to 5 seconds for the
+recorder; a click can be lost on a hard kill, which matches the previous
+`waitUntil` guarantee.
 
-Rules:
+## Frontend Conventions
 
-1. Every API route should have a request schema when applicable.
-2. Every API route should have explicit response schemas.
-3. The OpenAPI document should be generated from the route definitions.
-4. Avoid hand-maintained OpenAPI files when route metadata can be generated from code.
-
-## Database Migrations
-
-Migrations are forward-only and applied to the remote D1 database _before_ the new Worker is deployed (see the deploy workflows). Rules:
-
-1. Never edit `src/worker/db/schema.ts` without running `pnpm db:generate` and committing the resulting migration + snapshot. CI runs `pnpm db:check` and fails on drift.
-2. Every migration must be backward compatible with the Worker version that is currently running (expand/contract): add columns/tables/indexes first, ship code that writes both, and only drop or rename in a later release once nothing reads the old shape.
-3. SQLite cannot alter constraints in place, so drizzle-kit emits table rebuilds wrapped in `PRAGMA foreign_keys=OFF/ON`. D1 applies a migration atomically and that pragma is a no-op inside a transaction, so `DROP TABLE <parent>` can cascade into child tables. Review every generated rebuild; back up and restore affected child rows inside the migration (see `0005_square_nick_fury.sql`) and verify with a SQLite simulation in both `foreign_keys` modes before merging.
-4. Adding a `NOT NULL` column to a populated table needs a default (the default doubles as the backfill); document it in the migration file.
-5. Rollback: `wrangler rollback` / `wrangler deployments list` for the Worker; data via D1 Time Travel (`wrangler d1 time-travel info|restore`, 30-day window) or a `wrangler d1 export --remote` snapshot taken before applying production migrations. A restore loses writes after the bookmark.
-6. Test-side: the vitest setup applies the real migrations to each test file's isolated D1, so new migrations are exercised by the whole suite.
-
-## Operations
-
-`docs/runbook.md` is the operational source of truth (environments, secrets, deploy/verify, rollback, recovery, common failures). Update it together with behaviour changes.
+- Session truth is the `['me']` query (`apps/frontend/src/lib/data/keys.ts`
+  is the single place every query key is defined:
+  `['config']`, `['organizations']`, `['teams', orgId]`,
+  `['teamMembers', teamId]`, `['members', orgId]`, `['invitations', orgId]`,
+  `['invitation', id]`, `['links', orgId, filters]`, `['link', id]`,
+  `['history', id, page]`, `['analytics', id, days]`, `['sessions']`).
+  Mutations invalidate the affected keys.
+- Routing is code-based and typed (`apps/frontend/src/router.tsx`, one file,
+  one route tree). Pages read their own route's params/search through
+  `getRouteApi`, and cross-route navigation goes through the typed helpers
+  in `src/lib/routes.ts` (`orgParams` and friends) rather than hand-built
+  path strings.
+- `data-testid` attributes are a contract with `e2e/`: renaming or removing
+  one without checking the Playwright specs breaks CI, not just a lint rule.
 
 ## Testing Expectations
 
-Testing is a first-class requirement, not optional polish.
+- Go (`cd apps/server && go test -p 1 ./...`): against a real Postgres from
+  `TEST_DATABASE_URL` (`docker-compose.test.yml`, port 55432), never a mock.
+  `-p 1` is not optional — several packages share and truncate domain tables
+  between tests and cannot run as concurrent packages against one database.
+  `internal/testrig` applies migrations once per run and truncates between
+  tests.
+- Frontend: `bun run test` for route helpers and pure logic; `bun run check`
+  for biome + `tsc --noEmit` + the `api-schema.d.ts` drift guard.
+- Playwright (`e2e/`, `mise run e2e` or `bun run test:e2e`): runs against the
+  real container image via `scripts/e2e-stack.sh`, with `OPEN_SIGNUP=1` and
+  no `SMTP_*` configured, so mail is captured in memory and read back
+  through `GET /api/_test/mail` (`DELETE` clears it) — enabled by
+  `E2E_TEST_HOOKS=1`, refused unless `APP_URL` is a loopback origin, never
+  turn this on anywhere real.
 
-Before committing or pushing code, always run the validation commands that cover the affected surface area. At minimum, this means:
+Run the commands that cover what changed before committing; do not rely on
+CI to catch an avoidable regression.
 
-1. `pnpm lint`
-2. `pnpm build`
-3. `pnpm test`
+## Release Model and Conventional Commits
 
-If UI flows or browser-facing behavior changed, also run:
+Commit types decide the version: `feat` bumps the minor, `fix`/`perf` the
+patch, `!`/`BREAKING CHANGE` the major (kept at 0 by `--v0` until a human
+opts into 1.0). svu computes the version from commits since the last `v*`
+tag; GoReleaser (`.goreleaser.yaml`) builds and publishes everything
+downstream of the tag. See `README.md` → "Versioning and images" for the
+full pipeline. Commit trailer conventions belong to whatever tooling is
+producing a given commit, not to this file — AGENTS.md does not mandate
+trailers.
 
-1. `pnpm test:e2e`
+## Operations Pointers
 
-Do not rely on CI to catch avoidable lint, type, or test regressions after the fact.
-
-Minimum expectations:
-
-1. Unit tests for utility and authorization logic.
-2. Workers runtime integration tests for route behavior and D1 interactions.
-3. Playwright tests for critical user flows.
-4. Redirect and analytics behavior must be tested.
-5. Destructive behavior like Link deletion must be tested.
-
-Critical Playwright flows should include:
-
-1. sign up / sign in
-2. create organization
-3. create team
-4. invite member
-5. assign member to team
-6. create link
-7. visit `/l/:slug`
-8. edit link target
-9. view analytics
-10. delete link and verify removal
-
-## UX Guidance
-
-The admin UI should feel clean and deliberate, not generic.
-
-Priorities:
-
-1. Keep the information architecture obvious.
-2. Make Team scoping easy to understand.
-3. Make link creation and editing fast.
-4. Present analytics clearly without overbuilding V1.
-5. Keep public redirect concerns separate from admin routes.
-
-## Non-Goals for V1
-
-Do not introduce these unless the user explicitly asks for them:
-
-1. custom domains
-2. custom Team roles
-3. slug renames / aliases (custom slugs at creation are supported)
-4. SSO/SAML
-5. scheduled activation/deactivation
-6. Analytics Engine as primary analytics storage
-7. queue-based ingestion unless needed for reliability later
-
-## Implementation Advice
-
-1. Prefer a single full-stack Worker project.
-2. Keep route definitions and Zod schemas close together.
-3. Keep authorization helpers explicit and easy to test.
-4. Use D1 as the source of truth in V1.
-5. Record analytics asynchronously with `waitUntil` after issuing the redirect.
-6. Hash IPs with a secret-derived salt/pepper; do not persist raw IP addresses.
-7. Keep schema and code ready for later migration to richer analytics if needed.
-
-## Expected Repo Direction
-
-The repo is greenfield at the start of this work.
-
-Expected major areas:
-
-1. Worker app and API
-2. React admin app
-3. database schema and migrations
-4. tests
-5. generated or code-backed OpenAPI/Scalar docs
-
-When in doubt, optimize for:
-
-1. clarity
-2. explicitness
-3. testability
-4. small correct changes
+`docs/runbook.md` is the operational source of truth: where the container
+runs, configuration and secrets, deploy/verify, rollback, common failures
+and their log events. Update it in the same change as any behaviour it
+describes.
