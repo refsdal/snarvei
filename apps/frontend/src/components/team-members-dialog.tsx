@@ -18,18 +18,11 @@ import {
   Stack,
   Typography,
 } from "@mui/material";
-import { useEffect, useState } from "react";
-import { authClient } from "../lib/auth-client";
-import { readErrorMessage } from "../types";
-import type { Member, Team, TeamMember } from "../types";
-
-const fetchTeamMembers = async (teamId: string): Promise<{ members: TeamMember[]; error: string | null }> => {
-  const response = await fetch(`/api/teams/${teamId}/members`, { credentials: "include" });
-  if (!response.ok) {
-    return { members: [], error: await readErrorMessage(response, "Unable to load team members.") };
-  }
-  return { members: (await response.json()) as TeamMember[], error: null };
-};
+import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
+import { errorMessage } from "../lib/api";
+import { teamMembersQueryOptions, useAddTeamMember, useRemoveTeamMember } from "../lib/data";
+import type { Member, Team } from "../lib/data";
 
 /**
  * Manage which organization members belong to a team. Team membership is the
@@ -37,78 +30,46 @@ const fetchTeamMembers = async (teamId: string): Promise<{ members: TeamMember[]
  */
 export function TeamMembersDialog({
   team,
-  organizationId,
   members,
   onClose,
-  onChanged,
 }: {
   team: Team | null;
-  organizationId: string;
   members: Member[];
   onClose: () => void;
-  onChanged?: () => void;
 }) {
-  const [teamMembers, setTeamMembers] = useState<TeamMember[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const teamId = team?.id ?? "";
+  const teamMembers = useQuery({ ...teamMembersQueryOptions(teamId), enabled: Boolean(team) });
+  const addTeamMember = useAddTeamMember(teamId);
+  const removeTeamMember = useRemoveTeamMember(teamId);
   const [selectedUserId, setSelectedUserId] = useState("");
-  const [busy, setBusy] = useState(false);
-  const teamId = team?.id ?? null;
+  const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (!teamId) {
-      return;
-    }
-    let cancelled = false;
-    void fetchTeamMembers(teamId).then((result) => {
-      if (cancelled) {
-        return;
-      }
-      setTeamMembers(result.members);
-      setError(result.error);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [teamId]);
-
-  const reload = async (forTeamId: string) => {
-    const result = await fetchTeamMembers(forTeamId);
-    setTeamMembers(result.members);
-    setError(result.error);
-    onChanged?.();
-  };
-
-  const memberIds = new Set((teamMembers ?? []).map((member) => member.userId));
-  const candidates = members.filter((member) => !memberIds.has(member.user.id));
+  const memberIds = new Set((teamMembers.data ?? []).map((member) => member.userId));
+  const candidates = members.filter((member) => !memberIds.has(member.userId));
 
   const add = async () => {
-    if (!teamId || !selectedUserId) {
+    if (!selectedUserId) {
       return;
     }
-    setBusy(true);
-    const result = await authClient.organization.addTeamMember({ teamId, userId: selectedUserId, organizationId });
-    setBusy(false);
-    if (result.error) {
-      setError(result.error.message ?? "Unable to add the member to the team.");
-      return;
+    setError(null);
+    try {
+      await addTeamMember.mutateAsync(selectedUserId);
+      setSelectedUserId("");
+    } catch (err) {
+      setError(errorMessage(err, "Unable to add the member to the team."));
     }
-    setSelectedUserId("");
-    await reload(teamId);
   };
 
   const remove = async (userId: string) => {
-    if (!teamId) {
-      return;
+    setError(null);
+    try {
+      await removeTeamMember.mutateAsync(userId);
+    } catch (err) {
+      setError(errorMessage(err, "Unable to remove the member from the team."));
     }
-    setBusy(true);
-    const result = await authClient.organization.removeTeamMember({ teamId, userId, organizationId });
-    setBusy(false);
-    if (result.error) {
-      setError(result.error.message ?? "Unable to remove the member from the team.");
-      return;
-    }
-    await reload(teamId);
   };
+
+  const busy = addTeamMember.isPending || removeTeamMember.isPending;
 
   return (
     <Dialog open={Boolean(team)} onClose={onClose} fullWidth maxWidth="sm">
@@ -119,34 +80,28 @@ export function TeamMembersDialog({
             Organization members only see links of the teams they belong to. Owners and admins always see every team.
           </Typography>
           {error ? <Alert severity="error">{error}</Alert> : null}
-          {teamMembers === null ? (
+          {teamMembers.isPending ? (
             <CircularProgress size={24} />
-          ) : teamMembers.length ? (
+          ) : teamMembers.data?.length ? (
             <List dense disablePadding data-testid="team-members-list">
-              {teamMembers.map((teamMember) => {
-                const member = members.find((candidate) => candidate.user.id === teamMember.userId);
-                return (
-                  <ListItem
-                    key={teamMember.id}
-                    secondaryAction={
-                      <IconButton
-                        edge="end"
-                        aria-label={`Remove ${member?.user.email ?? teamMember.userId} from team`}
-                        data-testid={`remove-team-member-${teamMember.userId}`}
-                        disabled={busy}
-                        onClick={() => void remove(teamMember.userId)}
-                      >
-                        <DeleteOutlineIcon />
-                      </IconButton>
-                    }
-                  >
-                    <ListItemText
-                      primary={member?.user.name ?? teamMember.userId}
-                      secondary={member?.user.email ?? null}
-                    />
-                  </ListItem>
-                );
-              })}
+              {teamMembers.data.map((teamMember) => (
+                <ListItem
+                  key={teamMember.userId}
+                  secondaryAction={
+                    <IconButton
+                      edge="end"
+                      aria-label={`Remove ${teamMember.email} from team`}
+                      data-testid={`remove-team-member-${teamMember.userId}`}
+                      disabled={busy}
+                      onClick={() => void remove(teamMember.userId)}
+                    >
+                      <DeleteOutlineIcon />
+                    </IconButton>
+                  }
+                >
+                  <ListItemText primary={teamMember.name} secondary={teamMember.email} />
+                </ListItem>
+              ))}
             </List>
           ) : (
             <Alert severity="info">No members in this team yet.</Alert>
@@ -164,11 +119,11 @@ export function TeamMembersDialog({
                 {candidates.length ? (
                   candidates.map((member) => (
                     <MenuItem
-                      key={member.user.id}
-                      value={member.user.id}
-                      data-testid={`add-team-member-option-${member.user.email}`}
+                      key={member.userId}
+                      value={member.userId}
+                      data-testid={`add-team-member-option-${member.email}`}
                     >
-                      {member.user.name} · {member.user.email}
+                      {member.name} · {member.email}
                     </MenuItem>
                   ))
                 ) : (

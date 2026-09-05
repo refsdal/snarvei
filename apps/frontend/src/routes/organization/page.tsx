@@ -5,56 +5,56 @@ import { Alert, Box, Button, Card, CardContent, Chip, CircularProgress, Paper, S
 import { DataGrid, type GridColDef, Toolbar } from "@mui/x-data-grid";
 import { useMemo, useState } from "react";
 import { CreateTeamDialog, InviteMemberDialog } from "../../components/dialogs";
+import { useMessage } from "../../components/message-context";
 import { TeamMembersDialog } from "../../components/team-members-dialog";
-import { useWorkspace } from "../../hooks/use-workspace-context";
-import { roleLabel } from "../../types";
-import type { Invitation, Team } from "../../types";
+import { errorMessage } from "../../lib/api";
+import {
+  useCancelInvitation,
+  useCreateInvitation,
+  useCreateTeam,
+  useInvitations,
+  useMembers,
+  useTeams,
+} from "../../lib/data";
+import type { Invitation, Member, Team } from "../../lib/data";
+import { orgRoute } from "../../router";
 
 export function OrganizationPage() {
-  const {
-    activeOrganization,
-    activeOrganizationId,
-    cancelInvitation,
-    createTeam,
-    invitations,
-    loadingInvitations,
-    loadingMembers,
-    members,
-    refreshOrganizationData,
-    submitting,
-    teams,
-    inviteMember,
-  } = useWorkspace();
+  const { organization } = orgRoute.useRouteContext();
+  const { setMessage } = useMessage();
+  const members = useMembers(organization.id);
+  const teams = useTeams(organization.id);
+  const invitations = useInvitations(organization.id);
+  const createTeam = useCreateTeam(organization.id);
+  const createInvitation = useCreateInvitation(organization.id);
+  const cancelInvitation = useCancelInvitation(organization.id);
+
   const [inviteOpen, setInviteOpen] = useState(false);
   const [createTeamOpen, setCreateTeamOpen] = useState(false);
   const [managedTeam, setManagedTeam] = useState<Team | null>(null);
-  const teamName = (teamId?: string | null) => teams.find((team) => team.id === teamId)?.name ?? null;
+  const [cancellingId, setCancellingId] = useState<string | null>(null);
 
-  const columns = useMemo<GridColDef[]>(
+  const canManage = organization.role === "owner" || organization.role === "admin";
+
+  const columns = useMemo<GridColDef<Member>[]>(
     () => [
-      {
-        field: "name",
-        headerName: "Name",
-        flex: 1,
-        minWidth: 200,
-        valueGetter: (_value, row) => row.user.name,
-      },
-      {
-        field: "email",
-        headerName: "Email",
-        flex: 1.1,
-        minWidth: 240,
-        valueGetter: (_value, row) => row.user.email,
-      },
-      {
-        field: "role",
-        headerName: "Role",
-        width: 180,
-        valueGetter: (value) => roleLabel(value),
-      },
+      { field: "name", headerName: "Name", flex: 1, minWidth: 200 },
+      { field: "email", headerName: "Email", flex: 1.1, minWidth: 240 },
+      { field: "role", headerName: "Role", width: 180 },
     ],
     [],
   );
+
+  const cancel = async (invitation: Invitation) => {
+    setCancellingId(invitation.id);
+    try {
+      await cancelInvitation.mutateAsync(invitation.id);
+    } catch (err) {
+      setMessage({ severity: "error", text: errorMessage(err, "Unable to cancel the invitation.") });
+    } finally {
+      setCancellingId(null);
+    }
+  };
 
   return (
     <Stack spacing={3}>
@@ -68,35 +68,37 @@ export function OrganizationPage() {
             Organization
           </Typography>
           <Typography color="text.secondary">
-            Manage members, invitations, and teams for {activeOrganization?.name ?? "the active organization"}.
+            Manage members, invitations, and teams for {organization.name}.
           </Typography>
         </Box>
-        <Stack direction="row" spacing={1}>
-          <Button
-            variant="outlined"
-            startIcon={<AddIcon />}
-            onClick={() => setCreateTeamOpen(true)}
-            data-testid="open-create-team-button"
-          >
-            Create team
-          </Button>
-          <Button
-            variant="contained"
-            startIcon={<PersonAddAlt1Icon />}
-            onClick={() => setInviteOpen(true)}
-            data-testid="open-invite-member-button"
-          >
-            Invite member
-          </Button>
-        </Stack>
+        {canManage ? (
+          <Stack direction="row" spacing={1}>
+            <Button
+              variant="outlined"
+              startIcon={<AddIcon />}
+              onClick={() => setCreateTeamOpen(true)}
+              data-testid="open-create-team-button"
+            >
+              Create team
+            </Button>
+            <Button
+              variant="contained"
+              startIcon={<PersonAddAlt1Icon />}
+              onClick={() => setInviteOpen(true)}
+              data-testid="open-invite-member-button"
+            >
+              Invite member
+            </Button>
+          </Stack>
+        ) : null}
       </Stack>
 
       <Paper sx={{ border: "1px solid rgba(255,255,255,0.08)", p: 1.5 }}>
         <Box sx={{ height: 540 }}>
           <DataGrid
-            rows={members}
+            rows={members.data ?? []}
             columns={columns}
-            loading={loadingMembers}
+            loading={members.isPending}
             showToolbar
             slots={{ toolbar: Toolbar }}
             sx={{ border: 0 }}
@@ -111,19 +113,13 @@ export function OrganizationPage() {
               Teams
             </Typography>
             <Stack direction="row" spacing={1} sx={{ flexWrap: "wrap", gap: 1 }}>
-              {teams.length ? (
-                teams.map((team: Team) => (
+              {teams.data?.length ? (
+                teams.data.map((team) => (
                   <Chip
                     key={team.id}
                     label={team.name}
                     icon={<GroupIcon />}
-                    onClick={() => {
-                      // Refresh members first: someone may have accepted an invitation since the page loaded.
-                      if (activeOrganizationId) {
-                        void refreshOrganizationData(activeOrganizationId, { silent: true });
-                      }
-                      setManagedTeam(team);
-                    }}
+                    onClick={() => setManagedTeam(team)}
                     data-testid={`manage-team-${team.name}`}
                     clickable
                   />
@@ -132,7 +128,7 @@ export function OrganizationPage() {
                 <Alert severity="info">No teams in this organization yet.</Alert>
               )}
             </Stack>
-            {teams.length ? (
+            {teams.data?.length ? (
               <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1 }}>
                 Click a team to manage its members.
               </Typography>
@@ -145,10 +141,10 @@ export function OrganizationPage() {
             <Typography variant="h6" sx={{ fontWeight: 700, mb: 2 }}>
               Pending invitations
             </Typography>
-            {loadingInvitations ? <CircularProgress size={20} /> : null}
+            {invitations.isPending ? <CircularProgress size={20} /> : null}
             <Stack spacing={1}>
-              {invitations.length ? (
-                invitations.map((invitation: Invitation) => (
+              {invitations.data?.length ? (
+                invitations.data.map((invitation) => (
                   <Paper
                     key={invitation.id}
                     sx={{ p: 2, border: "1px solid rgba(255,255,255,0.06)" }}
@@ -158,16 +154,16 @@ export function OrganizationPage() {
                       <Box>
                         <Typography sx={{ fontWeight: 700 }}>{invitation.email}</Typography>
                         <Typography variant="body2" color="text.secondary">
-                          {roleLabel(invitation.role)} · {invitation.status}
-                          {teamName(invitation.teamId) ? ` · team ${teamName(invitation.teamId)}` : ""}
+                          {invitation.role} · {invitation.status}
+                          {invitation.teamName ? ` · team ${invitation.teamName}` : ""}
                         </Typography>
                       </Box>
-                      {invitation.status === "pending" ? (
+                      {canManage && invitation.status === "pending" ? (
                         <Button
                           size="small"
                           color="inherit"
-                          disabled={submitting === `cancel-${invitation.id}`}
-                          onClick={() => void cancelInvitation(invitation.id)}
+                          disabled={cancellingId === invitation.id}
+                          onClick={() => void cancel(invitation)}
                           data-testid={`cancel-invitation-${invitation.email}`}
                         >
                           Cancel
@@ -186,27 +182,34 @@ export function OrganizationPage() {
 
       <InviteMemberDialog
         open={inviteOpen}
-        submitting={submitting === "invite-member"}
-        teams={teams}
+        submitting={createInvitation.isPending}
+        teams={teams.data ?? []}
         onClose={() => setInviteOpen(false)}
-        onSubmit={async (values) => inviteMember(values)}
-      />
-      <TeamMembersDialog
-        team={managedTeam}
-        organizationId={activeOrganizationId ?? ""}
-        members={members}
-        onClose={() => setManagedTeam(null)}
-        onChanged={() => {
-          if (activeOrganizationId) {
-            void refreshOrganizationData(activeOrganizationId, { silent: true });
+        onSubmit={async ({ email, role, teamId }) => {
+          try {
+            await createInvitation.mutateAsync({ email, role, teamId: teamId || undefined });
+            setMessage({ severity: "success", text: `Invitation sent to ${email}.` });
+            return true;
+          } catch (err) {
+            setMessage({ severity: "error", text: errorMessage(err, "Unable to send the invitation.") });
+            return false;
           }
         }}
       />
+      <TeamMembersDialog team={managedTeam} members={members.data ?? []} onClose={() => setManagedTeam(null)} />
       <CreateTeamDialog
         open={createTeamOpen}
-        submitting={submitting === "create-team"}
+        submitting={createTeam.isPending}
         onClose={() => setCreateTeamOpen(false)}
-        onSubmit={async (values) => Boolean(await createTeam(values))}
+        onSubmit={async ({ name }) => {
+          try {
+            await createTeam.mutateAsync({ name });
+            return true;
+          } catch (err) {
+            setMessage({ severity: "error", text: errorMessage(err, "Unable to create the team.") });
+            return false;
+          }
+        }}
       />
     </Stack>
   );

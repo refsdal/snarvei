@@ -1,5 +1,5 @@
+export { DangerSection } from "./danger-section";
 export { EmailSection } from "./email-section";
-export { PasskeysSection } from "./passkeys-section";
 export { PasswordSection } from "./password-section";
 export { ProfileSection } from "./profile-section";
 export { SectionCard } from "./section-card";

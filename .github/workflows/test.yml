@@ -41,6 +41,10 @@ jobs:
           restore-keys: ${{ runner.os }}-go-
       - name: Install
         run: bun install --frozen-lockfile
+      - name: Generated API client is current
+        run: |
+          bun run gen:client
+          git diff --exit-code -- apps/frontend/src/lib/api-schema.d.ts || { echo "run 'bun run gen:client' and commit apps/frontend/src/lib/api-schema.d.ts"; exit 1; }
       - name: Lint + typecheck
         run: bun run check
       - name: Frontend tests

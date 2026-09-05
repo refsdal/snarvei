@@ -1,27 +1,21 @@
 import { Alert, Box, Button, CircularProgress, Paper, Stack, Typography } from "@mui/material";
+import { useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
-import { Navigate, useNavigate } from "react-router-dom";
 import { CreateOrganizationDialog } from "../../components/dialogs";
-import { useWorkspace } from "../../hooks/use-workspace-context";
-import { buildOrganizationPath } from "../../lib/routes";
-import type { OrganizationSummary } from "../../types";
+import { useMessage } from "../../components/message-context";
+import { errorMessage } from "../../lib/api";
+import type { Organization } from "../../lib/data";
+import { useCreateOrganization, useMe, useOrganizations } from "../../lib/data";
+import { orgParams } from "../../lib/routes";
 
 export function OrganizationSelectionPage() {
   const navigate = useNavigate();
-  const {
-    activeOrganizationId,
-    createOrganization,
-    loadingOrganizations,
-    organizations,
-    session,
-    submitting,
-    switchOrganization,
-  } = useWorkspace();
+  const { data: me } = useMe();
+  const { data: organizations = [], isPending } = useOrganizations();
+  const createOrganization = useCreateOrganization();
+  const { setMessage } = useMessage();
+  const activeOrganizationId = me?.session.activeOrganizationId ?? null;
   const [createOrganizationOpen, setCreateOrganizationOpen] = useState(false);
-
-  if (!session) {
-    return <Navigate to="/" replace />;
-  }
 
   return (
     <Box
@@ -44,10 +38,10 @@ export function OrganizationSelectionPage() {
               an invitation from an admin.
             </Typography>
           </Box>
-          {loadingOrganizations ? <CircularProgress /> : null}
+          {isPending ? <CircularProgress /> : null}
           {organizations.length ? (
             <Stack spacing={2}>
-              {organizations.map((organization: OrganizationSummary) => (
+              {organizations.map((organization: Organization) => (
                 <Paper key={organization.id} sx={{ p: 3, border: "1px solid rgba(255,255,255,0.08)" }}>
                   <Stack
                     direction={{ xs: "column", sm: "row" }}
@@ -62,11 +56,7 @@ export function OrganizationSelectionPage() {
                     </Box>
                     <Button
                       variant={activeOrganizationId === organization.id ? "contained" : "outlined"}
-                      onClick={() =>
-                        void switchOrganization(organization.id).then(() =>
-                          navigate(buildOrganizationPath(organization)),
-                        )
-                      }
+                      onClick={() => void navigate({ to: "/app/$org/dashboard", params: orgParams(organization) })}
                     >
                       Open workspace
                     </Button>
@@ -89,15 +79,17 @@ export function OrganizationSelectionPage() {
       </Paper>
       <CreateOrganizationDialog
         open={createOrganizationOpen}
-        submitting={submitting === "create-organization"}
+        submitting={createOrganization.isPending}
         onClose={() => setCreateOrganizationOpen(false)}
         onSubmit={async (values) => {
-          const createdOrganizationId = await createOrganization(values);
-          if (createdOrganizationId) {
-            void navigate(buildOrganizationPath({ id: createdOrganizationId, slug: values.slug }));
+          try {
+            const created = await createOrganization.mutateAsync(values);
+            void navigate({ to: "/app/$org/dashboard", params: orgParams(created) });
             return true;
+          } catch (err) {
+            setMessage({ severity: "error", text: errorMessage(err, "Unable to create organization.") });
+            return false;
           }
-          return false;
         }}
       />
     </Box>

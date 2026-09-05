@@ -1,20 +1,17 @@
-import {
-  Alert,
-  Box,
-  Button,
-  Card,
-  CardContent,
-  Chip,
-  CircularProgress,
-  Paper,
-  Stack,
-  TextField,
-  Typography,
-} from "@mui/material";
+import { Alert, Box, Button, Card, CardContent, Chip, Paper, Stack, TextField, Typography } from "@mui/material";
+import { useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
-import { Navigate, useNavigate, useSearchParams } from "react-router-dom";
-import { authClient } from "../../lib/auth-client";
-import { useWorkspace } from "../../hooks/use-workspace-context";
+import { errorMessage } from "../../lib/api";
+import {
+  password as passwordApi,
+  signInWithPassword,
+  signUpWithPassword,
+  verifyTwoFactor,
+} from "../../lib/auth-client";
+import { useConfig } from "../../lib/data";
+import { afterAuthPath } from "../../lib/routes";
+import { useMessage } from "../../components/message-context";
+import { indexRoute } from "../../router";
 
 const inputStyle = {
   width: "100%",
@@ -29,56 +26,81 @@ const inputStyle = {
 
 export function LandingPage() {
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
-  // Destination preserved by RequireSession (e.g. an invitation link); only in-app paths are honoured.
-  const nextParam = searchParams.get("next");
-  const afterAuthPath = nextParam?.startsWith("/app/") ? nextParam : "/app/select-organization";
-  const {
-    message,
-    refreshOrganizations,
-    refreshSessionState,
-    session,
-    sessionPending,
-    setMessage,
-    signIn,
-    signUp,
-    submitting,
-  } = useWorkspace();
+  const { next, forgot, reset } = indexRoute.useSearch();
+  const { data: config } = useConfig();
+  const signupOpen = config?.openSignup === true;
+  const { message, setMessage } = useMessage();
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
   const [password, setPassword] = useState("");
   const [twoFactorCode, setTwoFactorCode] = useState("");
   const [twoFactorMethod, setTwoFactorMethod] = useState<"totp" | "backup">("totp");
   const [twoFactorRequired, setTwoFactorRequired] = useState(false);
-  const [forgotOpen, setForgotOpen] = useState(searchParams.get("forgot") === "1");
+  const [submitting, setSubmitting] = useState<"signin" | "signup" | "verify" | null>(null);
+  const [forgotOpen, setForgotOpen] = useState(forgot === "1");
   const [forgotEmail, setForgotEmail] = useState("");
   const [forgotSubmitting, setForgotSubmitting] = useState(false);
   const [forgotSent, setForgotSent] = useState(false);
-  const resetDone = searchParams.get("reset") === "done";
+  const resetDone = reset === "done";
+
+  // `href`, not `to`: `afterAuthPath` may carry a query string (e.g. from an
+  // emailed settings link), and `to` does not split on "?".
+  const goToApp = () => navigate({ href: afterAuthPath(next), replace: true });
+
+  const handleSignIn = async () => {
+    setSubmitting("signin");
+    setMessage(null);
+    try {
+      const { twoFactorRequired: required } = await signInWithPassword(email, password);
+      setTwoFactorRequired(required);
+      if (!required) goToApp();
+    } catch (err) {
+      setMessage({ severity: "error", text: errorMessage(err, "Sign-in failed.") });
+    } finally {
+      setSubmitting(null);
+    }
+  };
+
+  const handleSignUp = async () => {
+    setSubmitting("signup");
+    setMessage(null);
+    try {
+      await signUpWithPassword(name.trim(), email, password);
+      goToApp();
+    } catch (err) {
+      setMessage({ severity: "error", text: errorMessage(err, "Unable to sign up.") });
+    } finally {
+      setSubmitting(null);
+    }
+  };
+
+  const handleVerifyTwoFactor = async () => {
+    setSubmitting("verify");
+    setMessage(null);
+    try {
+      await verifyTwoFactor(twoFactorCode);
+      setTwoFactorRequired(false);
+      setTwoFactorCode("");
+      goToApp();
+    } catch (err) {
+      setMessage({ severity: "error", text: errorMessage(err, "Verification failed.") });
+    } finally {
+      setSubmitting(null);
+    }
+  };
 
   const requestReset = async () => {
     setForgotSubmitting(true);
     setMessage(null);
-    const result = await authClient.requestPasswordReset({ email: forgotEmail.trim(), redirectTo: "/reset-password" });
-    setForgotSubmitting(false);
-    if (result.error) {
-      setMessage({ severity: "error", text: result.error.message ?? "Unable to send a reset link right now." });
-      return;
+    try {
+      await passwordApi.requestReset(forgotEmail.trim());
+      setForgotSent(true);
+    } catch (err) {
+      setMessage({ severity: "error", text: errorMessage(err, "Unable to send a reset link right now.") });
+    } finally {
+      setForgotSubmitting(false);
     }
-    setForgotSent(true);
   };
-
-  if (sessionPending) {
-    return (
-      <Box sx={{ minHeight: "100vh", display: "grid", placeItems: "center" }}>
-        <CircularProgress />
-      </Box>
-    );
-  }
-
-  if (session) {
-    return <Navigate to={afterAuthPath} replace />;
-  }
 
   return (
     <Box
@@ -105,12 +127,12 @@ export function LandingPage() {
             Short links you can trust long after they are shared.
           </Typography>
           <Typography variant="h6" color="text.secondary" sx={{ mt: 2, maxWidth: 680 }}>
-            Manage links by organization and team, update destinations safely, and track every click through a single
-            Cloudflare-native control plane.
+            Manage links by organization and team, update destinations safely, and track every click from one small
+            self-hosted service.
           </Typography>
           <Stack direction={{ xs: "column", sm: "row" }} spacing={2} sx={{ mt: 4 }}>
-            <Chip label="Cloudflare Workers" />
-            <Chip label="Better Auth organizations + teams" />
+            <Chip label="Self-hosted, one container" />
+            <Chip label="Organizations + teams" />
             <Chip label="OpenAPI + Scalar" />
           </Stack>
         </Paper>
@@ -133,24 +155,21 @@ export function LandingPage() {
                 noValidate
                 onSubmit={(event) => {
                   event.preventDefault();
-                  void signIn({ email, password }).then((result) => {
-                    setTwoFactorRequired(Boolean(result.requiresTwoFactor));
-                    if (result.ok) {
-                      void navigate(afterAuthPath);
-                    }
-                  });
+                  void handleSignIn();
                 }}
               >
                 <Stack spacing={2}>
-                  <TextField
-                    label="Name"
-                    placeholder="Your name (only needed to create an account)"
-                    value={name}
-                    onChange={(event) => setName(event.target.value)}
-                    autoComplete="name"
-                    fullWidth
-                    slotProps={{ htmlInput: { "data-testid": "auth-name-input" } }}
-                  />
+                  {signupOpen ? (
+                    <TextField
+                      label="Name"
+                      placeholder="Your name (only needed to create an account)"
+                      value={name}
+                      onChange={(event) => setName(event.target.value)}
+                      autoComplete="name"
+                      fullWidth
+                      slotProps={{ htmlInput: { "data-testid": "auth-name-input" } }}
+                    />
+                  ) : null}
                   <TextField
                     label="Email"
                     type="email"
@@ -181,19 +200,17 @@ export function LandingPage() {
                     >
                       Sign in
                     </Button>
-                    <Button
-                      type="button"
-                      variant="outlined"
-                      disabled={submitting === "signup" || !email || !password || !name.trim()}
-                      data-testid="create-account-button"
-                      onClick={() =>
-                        void signUp({ name: name.trim(), email, password }).then(
-                          (ok: boolean) => ok && navigate(afterAuthPath),
-                        )
-                      }
-                    >
-                      Create account
-                    </Button>
+                    {signupOpen ? (
+                      <Button
+                        type="button"
+                        variant="outlined"
+                        disabled={submitting === "signup" || !email || !password || !name.trim()}
+                        data-testid="create-account-button"
+                        onClick={() => void handleSignUp()}
+                      >
+                        Create account
+                      </Button>
+                    ) : null}
                   </Stack>
                 </Stack>
               </Box>
@@ -253,21 +270,6 @@ export function LandingPage() {
                   </Stack>
                 </Box>
               ) : null}
-              <Button
-                variant="text"
-                onClick={() =>
-                  void authClient.signIn.passkey({ autoFill: false }).then(async (result) => {
-                    if (result.error) {
-                      return;
-                    }
-                    await refreshSessionState();
-                    await refreshOrganizations({ silent: true });
-                    void navigate(afterAuthPath);
-                  })
-                }
-              >
-                Sign in with passkey
-              </Button>
               {twoFactorRequired ? (
                 <Stack spacing={1.5} sx={{ pt: 1 }}>
                   <Typography variant="subtitle2">Two-factor verification</Typography>
@@ -294,22 +296,8 @@ export function LandingPage() {
                   />
                   <Button
                     variant="outlined"
-                    onClick={() =>
-                      void (
-                        twoFactorMethod === "totp"
-                          ? authClient.twoFactor.verifyTotp({ code: twoFactorCode })
-                          : authClient.twoFactor.verifyBackupCode({ code: twoFactorCode })
-                      ).then(async (result) => {
-                        if (result.error) {
-                          return;
-                        }
-                        setTwoFactorRequired(false);
-                        setTwoFactorCode("");
-                        await refreshSessionState();
-                        await refreshOrganizations({ silent: true });
-                        void navigate(afterAuthPath);
-                      })
-                    }
+                    disabled={submitting === "verify"}
+                    onClick={() => void handleVerifyTwoFactor()}
                   >
                     Verify code
                   </Button>

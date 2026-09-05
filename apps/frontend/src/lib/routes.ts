@@ -1,6 +1,4 @@
-import type { OrganizationSummary } from "../types";
-
-type OrganizationTarget = Pick<OrganizationSummary, "id" | "slug"> | null | undefined;
+type OrganizationTarget = { id: string; slug?: string | null } | null | undefined;
 
 export const getOrganizationPathSegment = (organization: OrganizationTarget) =>
   organization?.slug ?? organization?.id ?? "";
@@ -16,3 +14,10 @@ export const buildLinksPath = (organization: OrganizationTarget, linkId?: string
 };
 
 export const settingsPath = "/app/settings";
+
+/** `{ org }` route params for a typed `navigate({ to: "/app/$org/...", params })`. */
+export const orgParams = (organization: OrganizationTarget) => ({ org: organization?.slug ?? organization?.id ?? "" });
+
+/** Where to go after sign-in/sign-up: a `next` that is an in-app path, else the picker. */
+export const afterAuthPath = (next: string | null | undefined): string =>
+  next === "/app" || (typeof next === "string" && next.startsWith("/app/")) ? next : "/app";
