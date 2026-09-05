@@ -13,20 +13,23 @@ import {
   Stack,
   Typography,
 } from "@mui/material";
+import { getRouteApi } from "@tanstack/react-router";
 import { useState } from "react";
 import { EditLinkDialog } from "../../components/dialogs";
 import { useMessage } from "../../components/message-context";
 import { ApiError, errorMessage } from "../../lib/api";
 import { useDeleteLink, useLink, useUpdateLink } from "../../lib/data";
 import { orgParams } from "../../lib/routes";
-import { linkDetailsRoute, orgRoute } from "../../router";
 import { NotFound } from "../../components/route-error";
 import { LinkAnalyticsCard, LinkHistoryCard } from "./components";
 
+const route = getRouteApi("/app/$org/links/$linkId");
+const orgRouteApi = getRouteApi("/app/$org");
+
 export function LinkDetailsPage() {
-  const navigate = linkDetailsRoute.useNavigate();
-  const { linkId } = linkDetailsRoute.useParams();
-  const { organization } = orgRoute.useRouteContext();
+  const navigate = route.useNavigate();
+  const { linkId } = route.useParams();
+  const { organization } = orgRouteApi.useRouteContext();
   const { setMessage } = useMessage();
   const link = useLink(linkId);
   const updateLink = useUpdateLink(organization.id);
@@ -45,7 +48,7 @@ export function LinkDetailsPage() {
 
   if (link.isError) {
     if (link.error instanceof ApiError && link.error.status === 404) {
-      return <NotFound />;
+      return <NotFound fullScreen={false} />;
     }
     return <Alert severity="error">{errorMessage(link.error, "Unable to load the selected link.")}</Alert>;
   }

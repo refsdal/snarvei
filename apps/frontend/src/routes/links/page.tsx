@@ -1,6 +1,7 @@
 import AddIcon from "@mui/icons-material/Add";
 import { Box, Button, FormControl, InputLabel, MenuItem, Paper, Select, Stack, Typography } from "@mui/material";
 import { DataGrid, type GridColDef, type GridRenderCellParams, type GridRowParams, Toolbar } from "@mui/x-data-grid";
+import { getRouteApi } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { CopyButton } from "../../components/copy-button";
 import { CreateLinkDialog } from "../../components/dialogs";
@@ -8,12 +9,14 @@ import { useMessage } from "../../components/message-context";
 import { ApiError, errorMessage } from "../../lib/api";
 import { useCreateLink, useLinks, useTeams } from "../../lib/data";
 import { orgParams } from "../../lib/routes";
-import { linksRoute, orgRoute } from "../../router";
+
+const route = getRouteApi("/app/$org/links");
+const orgRouteApi = getRouteApi("/app/$org");
 
 export function LinksPage() {
-  const navigate = linksRoute.useNavigate();
-  const { organization } = orgRoute.useRouteContext();
-  const { teamId, page = 1 } = linksRoute.useSearch();
+  const navigate = route.useNavigate();
+  const { organization } = orgRouteApi.useRouteContext();
+  const { teamId, page = 1 } = route.useSearch();
   const { setMessage } = useMessage();
   const teams = useTeams(organization.id);
   const links = useLinks(organization.id, { teamId, page, pageSize: 100 });

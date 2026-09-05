@@ -1,5 +1,5 @@
 import { Alert, Box, Button, Card, CardContent, Chip, Paper, Stack, TextField, Typography } from "@mui/material";
-import { useNavigate } from "@tanstack/react-router";
+import { getRouteApi, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { errorMessage } from "../../lib/api";
 import {
@@ -11,7 +11,8 @@ import {
 import { useConfig } from "../../lib/data";
 import { afterAuthPath } from "../../lib/routes";
 import { useMessage } from "../../components/message-context";
-import { indexRoute } from "../../router";
+
+const route = getRouteApi("/");
 
 const inputStyle = {
   width: "100%",
@@ -26,7 +27,7 @@ const inputStyle = {
 
 export function LandingPage() {
   const navigate = useNavigate();
-  const { next, forgot, reset } = indexRoute.useSearch();
+  const { next, forgot, reset } = route.useSearch();
   const { data: config } = useConfig();
   const signupOpen = config?.openSignup === true;
   const { message, setMessage } = useMessage();

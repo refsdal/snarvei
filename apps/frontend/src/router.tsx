@@ -20,7 +20,7 @@ export type RouterContext = { queryClient: QueryClient };
 export const rootRoute = createRootRouteWithContext<RouterContext>()({
   component: () => <Outlet />,
   errorComponent: RouteError,
-  notFoundComponent: NotFound,
+  notFoundComponent: () => <NotFound />,
 });
 
 type LandingSearch = { next?: string; forgot?: string; reset?: string };

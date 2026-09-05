@@ -1,6 +1,6 @@
 import { Alert, Box, Button, CircularProgress, Paper, Stack, TextField, Typography } from "@mui/material";
 import { useQuery } from "@tanstack/react-query";
-import { createLink, useNavigate } from "@tanstack/react-router";
+import { createLink, getRouteApi, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { useMessage } from "../../components/message-context";
 import { ApiError, errorMessage } from "../../lib/api";
@@ -12,14 +12,15 @@ import {
   useRegisterWithInvitation,
   useRejectInvitation,
 } from "../../lib/data";
-import { invitationRoute } from "../../router";
 
 // `createLink` (not `component={Link}`) is what keeps `search` typed against
 // the target route when the link renders as a MUI Button.
 const LinkButton = createLink(Button);
 
+const route = getRouteApi("/app/invitations/$invitationId");
+
 export function InvitationPage() {
-  const { invitationId } = invitationRoute.useParams();
+  const { invitationId } = route.useParams();
   const navigate = useNavigate();
   const { setMessage } = useMessage();
   const invitation = usePublicInvitation(invitationId);
