@@ -7,46 +7,13 @@ import (
 	"github.com/refsdal/snarvei/server/internal/api/gen"
 )
 
-// mountImageRoutes and mountTestHooks are hand-routed (not part of the
-// OpenAPI spec) and stubbed no-ops until their tasks land.
-func (d Deps) mountImageRoutes(*http.ServeMux) {}
-func (d Deps) mountTestHooks(*http.ServeMux)   {}
+// mountTestHooks is hand-routed (not part of the OpenAPI spec) and stubbed
+// as a no-op until its task lands.
+func (d Deps) mountTestHooks(*http.ServeMux) {}
 
-// notImplemented is what every stub below answers: 501, until Tasks 9 and 10
-// replace each method one by one.
+// notImplemented is what every stub below answers: 501, until Task 10
+// replaces each method one by one.
 var notImplemented = fail(http.StatusNotImplemented, "NOT_IMPLEMENTED", "Not implemented yet")
-
-func (d Deps) GetMe(context.Context, gen.GetMeRequestObject) (gen.GetMeResponseObject, error) {
-	return nil, notImplemented
-}
-
-func (d Deps) UpdateMe(context.Context, gen.UpdateMeRequestObject) (gen.UpdateMeResponseObject, error) {
-	return nil, notImplemented
-}
-
-func (d Deps) DeleteMe(context.Context, gen.DeleteMeRequestObject) (gen.DeleteMeResponseObject, error) {
-	return nil, notImplemented
-}
-
-func (d Deps) RequestEmailChange(context.Context, gen.RequestEmailChangeRequestObject) (gen.RequestEmailChangeResponseObject, error) {
-	return nil, notImplemented
-}
-
-func (d Deps) ConfirmEmailChange(context.Context, gen.ConfirmEmailChangeRequestObject) (gen.ConfirmEmailChangeResponseObject, error) {
-	return nil, notImplemented
-}
-
-func (d Deps) ListMySessions(context.Context, gen.ListMySessionsRequestObject) (gen.ListMySessionsResponseObject, error) {
-	return nil, notImplemented
-}
-
-func (d Deps) RevokeOtherSessions(context.Context, gen.RevokeOtherSessionsRequestObject) (gen.RevokeOtherSessionsResponseObject, error) {
-	return nil, notImplemented
-}
-
-func (d Deps) RevokeMySession(context.Context, gen.RevokeMySessionRequestObject) (gen.RevokeMySessionResponseObject, error) {
-	return nil, notImplemented
-}
 
 func (d Deps) ListOrganizations(context.Context, gen.ListOrganizationsRequestObject) (gen.ListOrganizationsResponseObject, error) {
 	return nil, notImplemented
