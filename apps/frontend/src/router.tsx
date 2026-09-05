@@ -148,10 +148,6 @@ export const linkDetailsRoute = createRoute({
   component: lazyRouteComponent(() => import("./routes/link-details/page"), "LinkDetailsPage"),
 });
 
-// Route stub so `navigate({ to: "/app/$org/organization", ... })` type-checks
-// from Task 4's "invite member" links before the page itself is ported in
-// Task 5. The unported page still renders fine on its own (it is not wired
-// into orgRoute.addChildren by any earlier task) — this just gives it a URL.
 export const organizationRoute = createRoute({
   getParentRoute: () => orgRoute,
   path: "/organization",

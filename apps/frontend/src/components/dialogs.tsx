@@ -16,8 +16,9 @@ import {
   TextField,
 } from "@mui/material";
 import { useState } from "react";
-import type { Link } from "../lib/data";
-import type { InvitationRole, SelectedLinkFormValues, Team } from "../types";
+import type { Link, Team } from "../lib/data";
+import type { InvitationRole } from "../lib/roles";
+import type { SelectedLinkFormValues } from "../types";
 
 export function CreateOrganizationDialog({
   open,
@@ -323,7 +324,6 @@ export function InviteMemberDialog({
             >
               <MenuItem value="member">member</MenuItem>
               <MenuItem value="admin">admin</MenuItem>
-              <MenuItem value="owner">owner</MenuItem>
             </Select>
           </FormControl>
           <FormControl>
