@@ -3,7 +3,9 @@
 > operations described below are the OLD ones until phase 5 rewrites this file.
 > The design is `docs/superpowers/specs/2026-09-04-go-backend-migration-design.md`;
 > the current phase plan is under `docs/superpowers/plans/`. Backend: `apps/server`
-> (Go); frontend: `apps/frontend`; build: `scripts/build-artifacts.sh`.
+> (Go); frontend: `apps/frontend`; build: `scripts/build-artifacts.sh`. Phase 2
+> (auth, organizations, teams, invitations, profile, email, storage) is
+> implemented; see the OpenAPI spec for the live routes.
 
 # AGENTS.md
 

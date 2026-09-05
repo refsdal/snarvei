@@ -14,6 +14,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -25,8 +26,14 @@ import (
 	_ "time/tzdata"
 
 	"github.com/refsdal/snarvei/server/internal/api"
+	"github.com/refsdal/snarvei/server/internal/auth"
+	"github.com/refsdal/snarvei/server/internal/clientip"
 	"github.com/refsdal/snarvei/server/internal/config"
 	"github.com/refsdal/snarvei/server/internal/db"
+	dbgen "github.com/refsdal/snarvei/server/internal/db/gen"
+	"github.com/refsdal/snarvei/server/internal/email"
+	"github.com/refsdal/snarvei/server/internal/ratelimit"
+	"github.com/refsdal/snarvei/server/internal/storage"
 	"github.com/refsdal/snarvei/server/internal/web"
 )
 
@@ -117,6 +124,7 @@ func migrateMode() int {
 		log.Printf("configuration error: %v", err)
 		return 1
 	}
+	setupLogging(cfg.LogLevel)
 	// Background, not signal-cancelled: aborting DDL halfway is worse than
 	// being killed after the grace period.
 	if err := db.ApplyMigrations(context.Background(), cfg.DatabaseURL, cfg.MigrationLockKey); err != nil {
@@ -133,6 +141,7 @@ func serveMode(migrate bool) int {
 		log.Printf("configuration error: %v", err)
 		return 1
 	}
+	setupLogging(cfg.LogLevel)
 
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGTERM, syscall.SIGINT)
@@ -154,14 +163,12 @@ func serve(cfg *config.Config, migrate bool, sig <-chan os.Signal) int {
 		}
 	}
 
-	pool, err := db.New(context.Background(), cfg.DatabaseURL)
+	deps, closeDeps, err := buildDeps(context.Background(), cfg)
 	if err != nil {
 		log.Printf("startup failed: %v", err)
 		return 1
 	}
-	defer pool.Close()
-
-	deps := api.Deps{Pool: pool, AppName: cfg.AppName, OpenSignup: cfg.OpenSignup, Version: version}
+	defer closeDeps()
 
 	srv := &http.Server{
 		Addr:              fmt.Sprintf(":%d", cfg.Port),
@@ -170,11 +177,9 @@ func serve(cfg *config.Config, migrate bool, sig <-chan os.Signal) int {
 		IdleTimeout:       idleTimeout,
 	}
 
-	log.Printf("snarvei %s listening on http://0.0.0.0:%d", version, cfg.Port)
-	log.Printf("  app url:  %s", cfg.AppURL)
-	log.Printf("  storage:  %s", cfg.StorageDriver)
-	if off := cfg.DisabledSubsystems(); len(off) > 0 {
-		log.Printf("  disabled: %s", strings.Join(off, ", "))
+	slog.Info("snarvei listening", "version", version, "port", cfg.Port, "app_url", cfg.AppURL, "storage", cfg.StorageDriver, "disabled", cfg.DisabledSubsystems())
+	if cfg.E2ETestHooks {
+		slog.Info("test hooks enabled")
 	}
 
 	errc := make(chan error, 1)
@@ -207,4 +212,68 @@ func signalName(s os.Signal) string {
 	default:
 		return s.String()
 	}
+}
+
+// setupLogging configures the process-wide slog default as JSON on stdout.
+// Called once, right after config loads, in serveMode and migrateMode.
+func setupLogging(level string) {
+	var lvl slog.Level
+	_ = lvl.UnmarshalText([]byte(strings.ToUpper(level)))
+	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: lvl})))
+}
+
+// buildDeps assembles every collaborator from validated config. The only
+// place in the program that constructs a client.
+func buildDeps(ctx context.Context, cfg *config.Config) (api.Deps, func(), error) {
+	pool, err := db.New(ctx, cfg.DatabaseURL)
+	if err != nil {
+		return api.Deps{}, nil, err
+	}
+	closePool := func() { pool.Close() }
+
+	q := dbgen.New(pool)
+	hasher := clientip.NewHasher(cfg.IPHashPepper, cfg.AuthSecret)
+	sender, mailbox := buildEmail(cfg)
+	authService, err := auth.New(auth.Config{
+		AppURL: cfg.AppURL, AppName: cfg.AppName, Secret: cfg.AuthSecret, OpenSignup: cfg.OpenSignup,
+		Pool: pool, ClientIP: hasher.Extractor(cfg.TrustedProxyHops), Email: sender, Log: slog.Default(),
+	})
+	if err != nil {
+		closePool()
+		return api.Deps{}, nil, err
+	}
+	store, err := buildStorage(cfg)
+	if err != nil {
+		closePool()
+		return api.Deps{}, nil, err
+	}
+	return api.Deps{
+		Pool: pool, Q: q, Auth: authService, Storage: store, Email: sender, Mail: mailbox,
+		RateLimit: ratelimit.NewPostgres(q), Hasher: hasher, Log: slog.Default(),
+		AppURL: cfg.AppURL, AppName: cfg.AppName, OpenSignup: cfg.OpenSignup, Version: version,
+		TrustedProxyHops: cfg.TrustedProxyHops, TestHooks: cfg.E2ETestHooks,
+	}, closePool, nil
+}
+
+func buildStorage(cfg *config.Config) (storage.Storage, error) {
+	switch cfg.StorageDriver {
+	case "fs":
+		return storage.NewFS(cfg.StorageFSPath)
+	case "s3":
+		return storage.NewS3(storage.S3Config{Bucket: cfg.S3Bucket, Endpoint: cfg.S3Endpoint, AccessKeyID: cfg.S3AccessKeyID, SecretAccessKey: cfg.S3SecretAccessKey, Region: cfg.S3Region}), nil
+	}
+	return nil, fmt.Errorf("unknown storage driver %q", cfg.StorageDriver)
+}
+
+// buildEmail picks SMTP when configured; with test hooks on, mail is captured
+// in memory for the e2e suite instead (the hook endpoint reads it back).
+func buildEmail(cfg *config.Config) (email.Sender, *email.Recording) {
+	if cfg.E2ETestHooks {
+		rec := email.NewRecording()
+		return rec, rec
+	}
+	if cfg.EmailEnabled() {
+		return email.NewSMTP(email.SMTPConfig{Host: cfg.SMTPHost, Port: cfg.SMTPPort, Username: cfg.SMTPUsername, Password: cfg.SMTPPassword, From: cfg.EmailFrom}), nil
+	}
+	return email.NewNoop(slog.Default()), nil
 }

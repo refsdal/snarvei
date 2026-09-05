@@ -8,13 +8,53 @@ import (
 	"testing"
 
 	"github.com/refsdal/snarvei/server/internal/api"
+	"github.com/refsdal/snarvei/server/internal/auth"
+	"github.com/refsdal/snarvei/server/internal/clientip"
+	dbgen "github.com/refsdal/snarvei/server/internal/db/gen"
+	"github.com/refsdal/snarvei/server/internal/email"
+	"github.com/refsdal/snarvei/server/internal/ratelimit"
+	"github.com/refsdal/snarvei/server/internal/storage"
 	"github.com/refsdal/snarvei/server/internal/testrig"
 )
+
+const testSecret = "snarvei-api-test-secret-0123456789012"
 
 func handler(t *testing.T) (http.Handler, *testrig.Rig) {
 	t.Helper()
 	rig := testrig.Setup(t)
-	return api.NewHandler(api.Deps{Pool: rig.Pool, AppName: "Snarvei Test", OpenSignup: false, Version: "test-sha"}), rig
+	return api.NewHandler(deps(t, rig, "Snarvei Test", false, "test-sha")), rig
+}
+
+// deps builds a full Deps over rig's pool: a real auth.Service backed by a
+// Recording email sender, real db/gen queries and a Postgres rate limiter.
+func deps(t *testing.T, rig *testrig.Rig, appName string, openSignup bool, version string) api.Deps {
+	t.Helper()
+	hasher := clientip.NewHasher("", testSecret)
+	q := dbgen.New(rig.Pool)
+	svc, err := auth.New(auth.Config{
+		AppURL:     "http://localhost:3000",
+		AppName:    appName,
+		Secret:     testSecret,
+		OpenSignup: openSignup,
+		Pool:       rig.Pool,
+		ClientIP:   hasher.Extractor(0),
+		Email:      email.NewRecording(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return api.Deps{
+		Pool:       rig.Pool,
+		Q:          q,
+		Auth:       svc,
+		Storage:    storage.NewMemory(),
+		Email:      email.NewRecording(),
+		RateLimit:  ratelimit.NewPostgres(q),
+		Hasher:     hasher,
+		AppName:    appName,
+		OpenSignup: openSignup,
+		Version:    version,
+	}
 }
 
 func getJSON(t *testing.T, h http.Handler, path string) (*httptest.ResponseRecorder, map[string]any) {
@@ -32,7 +72,10 @@ func getJSON(t *testing.T, h http.Handler, path string) (*httptest.ResponseRecor
 }
 
 func TestHealthz(t *testing.T) {
-	h := api.NewHandler(api.Deps{Pool: nil, AppName: "x", Version: "abc"}) // nil pool: healthz must not touch it
+	rig := testrig.Setup(t)
+	d := deps(t, rig, "x", false, "abc")
+	d.Pool = nil // healthz must not touch the pool
+	h := api.NewHandler(d)
 	rec, body := getJSON(t, h, "/healthz")
 	if rec.Code != 200 || body["ok"] != true || body["service"] != "snarvei" || body["version"] != "abc" {
 		t.Fatalf("healthz = %d %v", rec.Code, body)
@@ -85,5 +128,13 @@ func TestWrongMethodIsRejectedBySpec(t *testing.T) {
 	}
 	if !strings.HasPrefix(rec.Header().Get("Content-Type"), "application/json") {
 		t.Fatalf("expected a JSON error body, got %q", rec.Body.String())
+	}
+}
+
+func TestGetMeWithoutSessionIsUnauthenticated(t *testing.T) {
+	h, _ := handler(t)
+	rec, body := getJSON(t, h, "/api/me")
+	if rec.Code != http.StatusUnauthorized || body["code"] != "UNAUTHENTICATED" {
+		t.Fatalf("GET /api/me anonymous = %d %v, want 401 UNAUTHENTICATED", rec.Code, body)
 	}
 }

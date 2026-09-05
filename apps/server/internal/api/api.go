@@ -1,15 +1,14 @@
-// Package api owns every route in openapi/snarvei.yaml. NewHandler validates
-// requests against the embedded spec (kin-openapi), dispatches to the
-// generated strict server, and answers a JSON 404 for anything the spec does
-// not know. It never reads the environment or constructs a dependency: cmd/
-// snarvei hands it a Deps.
+// Package api owns every route in openapi/snarvei.yaml plus the hand-routed
+// binary endpoints. It never reads the environment or constructs a
+// dependency: cmd/snarvei hands it a Deps.
 package api
 
 import (
 	"context"
 	_ "embed"
+	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 
 	"github.com/getkin/kin-openapi/openapi3"
@@ -17,7 +16,14 @@ import (
 	nethttpmiddleware "github.com/oapi-codegen/nethttp-middleware"
 
 	"github.com/refsdal/snarvei/server/internal/api/gen"
+	"github.com/refsdal/snarvei/server/internal/api/middleware"
 	"github.com/refsdal/snarvei/server/internal/api/respond"
+	"github.com/refsdal/snarvei/server/internal/auth"
+	"github.com/refsdal/snarvei/server/internal/clientip"
+	dbgen "github.com/refsdal/snarvei/server/internal/db/gen"
+	"github.com/refsdal/snarvei/server/internal/email"
+	"github.com/refsdal/snarvei/server/internal/ratelimit"
+	"github.com/refsdal/snarvei/server/internal/storage"
 )
 
 // specYAML is the committed copy of openapi/snarvei.yaml (see generate.go).
@@ -25,12 +31,33 @@ import (
 //go:embed snarvei.yaml
 var specYAML []byte
 
-// Deps is everything the handlers need. Fields grow with each phase.
+// Deps is everything the handlers need.
 type Deps struct {
-	Pool       *pgxpool.Pool
-	AppName    string
-	OpenSignup bool
-	Version    string
+	Pool    *pgxpool.Pool
+	Q       *dbgen.Queries
+	Auth    auth.Service
+	Storage storage.Storage
+	Email   email.Sender
+	// Mail is set only when TestHooks is on: the same Recording the Email
+	// field points at, exposed at GET /api/_test/mail for Playwright.
+	Mail      *email.Recording
+	RateLimit ratelimit.Store
+	Hasher    *clientip.Hasher
+	Log       *slog.Logger
+
+	AppURL           string
+	AppName          string
+	OpenSignup       bool
+	Version          string
+	TrustedProxyHops int
+	TestHooks        bool
+}
+
+func (d Deps) log() *slog.Logger {
+	if d.Log == nil {
+		return slog.Default()
+	}
+	return d.Log
 }
 
 func loadSpec() *openapi3.T {
@@ -69,13 +96,19 @@ func handleNotFound(w http.ResponseWriter, _ *http.Request) {
 	respond.Error(w, http.StatusNotFound, "NOT_FOUND", "Not found")
 }
 
-func requestErrorHandler(w http.ResponseWriter, r *http.Request, err error) {
-	log.Printf("api: %s %s: invalid request: %v", r.Method, r.URL.Path, err)
+func (d Deps) requestErrorHandler(w http.ResponseWriter, r *http.Request, err error) {
+	d.log().Error("invalid request", "event", "request.invalid", "method", r.Method, "path", r.URL.Path, "error", err.Error())
 	respond.Error(w, http.StatusBadRequest, "VALIDATION_FAILED", "Invalid request")
 }
 
-func responseErrorHandler(w http.ResponseWriter, r *http.Request, err error) {
-	log.Printf("api: %s %s: %v", r.Method, r.URL.Path, err)
+func (d Deps) responseErrorHandler(w http.ResponseWriter, r *http.Request, err error) {
+	err = classify(err)
+	var he *httpError
+	if errors.As(err, &he) {
+		respond.Error(w, he.status, he.code, he.message)
+		return
+	}
+	d.log().Error("unhandled error", "event", "request.error", "method", r.Method, "path", r.URL.Path, "error", err.Error())
 	respond.Error(w, http.StatusInternalServerError, "INTERNAL", "Internal error")
 }
 
@@ -89,21 +122,25 @@ func noStore(next http.Handler) http.Handler {
 	})
 }
 
-// NewHandler builds the handler for every server-owned path. web.Handler
-// wraps it and is what cmd/snarvei serves.
+// NewHandler builds the handler for every server-owned path.
 func NewHandler(d Deps) http.Handler {
 	spec := loadSpec()
+	assertTierCoverage(spec)
+	if d.Auth == nil || d.Q == nil || d.RateLimit == nil || d.Hasher == nil || d.Storage == nil || d.Email == nil {
+		panic("api: NewHandler needs Auth, Q, RateLimit, Hasher, Storage and Email")
+	}
+
 	mux := http.NewServeMux()
+	mux.Handle(auth.BasePath+"/", d.Auth.Handler())
+	d.mountImageRoutes(mux)
+	if d.TestHooks {
+		d.mountTestHooks(mux)
+	}
+	mux.Handle("/", withSpecValidation(spec, http.HandlerFunc(handleNotFound)))
 
-	// Least specific: any server-owned path the spec does not know answers a
-	// JSON 404 (web.Handler routes /l/, /images/, /openapi.json and /scalar
-	// here too until their phases land).
-	notFound := http.HandlerFunc(handleNotFound)
-	mux.Handle("/", withSpecValidation(spec, notFound))
-
-	strict := gen.NewStrictHandlerWithOptions(d, nil, gen.StrictHTTPServerOptions{
-		RequestErrorHandlerFunc:  requestErrorHandler,
-		ResponseErrorHandlerFunc: responseErrorHandler,
+	strict := gen.NewStrictHandlerWithOptions(d, []gen.StrictMiddlewareFunc{d.tierMiddleware()}, gen.StrictHTTPServerOptions{
+		RequestErrorHandlerFunc:  d.requestErrorHandler,
+		ResponseErrorHandlerFunc: d.responseErrorHandler,
 	})
 	gen.HandlerWithOptions(strict, gen.StdHTTPServerOptions{
 		BaseRouter: mux,
@@ -112,5 +149,5 @@ func NewHandler(d Deps) http.Handler {
 		},
 	})
 
-	return noStore(mux)
+	return middleware.TrustedProxy(d.TrustedProxyHops)(noStore(mux))
 }

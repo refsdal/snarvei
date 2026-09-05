@@ -107,6 +107,13 @@ jobs:
           curl -fsS http://localhost:3000/ | grep -q 'assets/'
           curl -fsS http://localhost:3000/robots.txt | grep -q 'Disallow: /'
           test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:3000/api/nope)" = "404"
+          # A sign-in with unknown credentials must answer 401: Limen loaded,
+          # its Postgres adapter resolved, and a query ran end to end.
+          status=$(curl -s -o /dev/null -w '%{http_code}' \
+            -X POST http://localhost:3000/api/auth/signin/credential \
+            -H 'content-type: application/json' -H 'origin: http://localhost:3000' \
+            -d '{"credential":"nobody@example.invalid","password":"wrong-password"}')
+          test "$status" = "401" || { echo "sign-in probe returned $status, expected 401"; exit 1; }
           # The healthcheck subcommand runs from the shell-less image.
           docker exec app /app/snarvei healthcheck
 

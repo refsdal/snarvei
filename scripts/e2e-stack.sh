@@ -52,6 +52,7 @@ docker run -d --name "$APP" --network "$NET" -p "$PORT":3000 \
   -e AUTH_SECRET=e2e-stack-secret-at-least-32-bytes-long \
   -e STORAGE_DRIVER=fs -e STORAGE_FS_PATH=/data \
   -e OPEN_SIGNUP=1 \
+  -e E2E_TEST_HOOKS=1 \
   snarvei:e2e >/dev/null
 
 for i in $(seq 1 30); do
