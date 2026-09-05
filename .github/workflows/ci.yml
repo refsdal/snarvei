@@ -1,76 +1,142 @@
 name: CI
 
-# pull_request covers every branch; push is limited to main so a PR branch does
-# not run CI twice (the push run on main is what gates Deploy Dev).
+# The PR gate: the full suite, then the image built once from native
+# artifacts, smoke-tested, driven through Playwright, and pushed as a
+# semver-prerelease preview.
 on:
   pull_request:
-  push:
-    branches: [main]
 
 permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.head_ref }}
   cancel-in-progress: true
 
 jobs:
-  validate:
-    name: Validate
+  test:
+    uses: ./.github/workflows/test.yml
+    permissions:
+      contents: read
+
+  image:
+    needs: test
     runs-on: ubuntu-latest
-    timeout-minutes: 30
-
+    permissions:
+      contents: read
+      packages: write
+    env:
+      REGISTRY: ghcr.io
+      IMAGE_NAME: ${{ github.repository }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-
-      # pnpm version comes from package.json "packageManager"; Node from .nvmrc.
-      - name: Setup pnpm
-        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
-
-      - name: Setup Node.js
-        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          node-version-file: .nvmrc
-          cache: pnpm
+          fetch-depth: 0
+      - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
+        with:
+          install_args: "go bun aqua:caarlos0/svu"
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: ${{ runner.os }}-go-${{ hashFiles('apps/server/go.sum') }}
+          restore-keys: ${{ runner.os }}-go-
+      - name: Install
+        run: bun install --frozen-lockfile
 
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+      # What the next release WOULD be, so preview tags sort below it.
+      - name: Compute version
+        id: version
+        run: |
+          tag=$(svu next --v0)
+          echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
 
+      - name: Build artifacts (SPA + both server binaries)
+        run: VERSION=${{ steps.version.outputs.version }}-pr.${{ github.event.pull_request.number }} bash scripts/build-artifacts.sh
+
+      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+
+      - name: Can this run push?
+        id: gate
+        run: |
+          if [ "${{ github.event.pull_request.head.repo.full_name }}" != "${{ github.repository }}" ]; then
+            echo "push=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "push=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Log in to the container registry
+        if: steps.gate.outputs.push == 'true'
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build image
+        run: docker build -t snarvei:ci .
+
+      - name: Smoke-test the image
+        run: |
+          set -euo pipefail
+          docker network create snarvei-ci
+          docker run -d --name pg --network snarvei-ci \
+            -e POSTGRES_USER=snarvei -e POSTGRES_PASSWORD=snarvei -e POSTGRES_DB=snarvei postgres:17-alpine
+          for i in $(seq 1 30); do
+            docker exec pg pg_isready -h 127.0.0.1 -U snarvei -d snarvei && break
+            sleep 1
+          done
+          env_args=(
+            -e DATABASE_URL=postgres://snarvei:snarvei@pg:5432/snarvei
+            -e APP_URL=http://localhost:3000
+            -e AUTH_SECRET=ci-smoke-test-secret-at-least-32-bytes-long
+            -e STORAGE_DRIVER=fs
+            -e STORAGE_FS_PATH=/data
+          )
+          # Migrations must apply from the image itself.
+          docker run --rm --network snarvei-ci "${env_args[@]}" snarvei:ci migrate
+          docker run -d --name app --network snarvei-ci -p 3000:3000 "${env_args[@]}" snarvei:ci
+          for i in $(seq 1 30); do
+            curl -fsS http://localhost:3000/healthz && break
+            sleep 1
+          done
+          curl -fsS http://localhost:3000/readyz | grep -q '"ok":true'
+          curl -fsS http://localhost:3000/api/config | grep -q '"appName":"Snarvei"'
+          curl -fsS http://localhost:3000/ | grep -qi '<title>Snarvei'
+          curl -fsS http://localhost:3000/ | grep -q 'assets/'
+          curl -fsS http://localhost:3000/robots.txt | grep -q 'Disallow: /'
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:3000/api/nope)" = "404"
+          # The healthcheck subcommand runs from the shell-less image.
+          docker exec app /app/snarvei healthcheck
+
+      # The Playwright suite drives the same smoke-tested image through a real
+      # browser, on the e2e stack's own port so the smoke containers can stay up.
       - name: Install Playwright browser
-        run: pnpm exec playwright install --with-deps chromium
+        run: bunx playwright install --with-deps chromium
 
-      - name: Generate Worker types
-        run: pnpm cf-typegen
-
-      - name: Lint
-        run: pnpm lint
-
-      - name: Format check
-        run: pnpm format:check
-
-      # Fails when src/worker/db/schema.ts changed without a committed migration
-      # (drizzle-kit would generate a new file) or when the journal/snapshots
-      # are inconsistent.
-      - name: Check migrations are in sync with the schema
-        run: pnpm db:check
-
-      - name: Build
-        run: pnpm build
-
-      - name: Run unit and integration tests
-        run: pnpm test
-
-      - name: Run end-to-end tests
-        run: pnpm test:e2e
+      - name: End-to-end tests against the image
+        run: |
+          docker tag snarvei:ci snarvei:e2e
+          bash scripts/e2e-stack.sh up
+          bun run test:e2e
+          bash scripts/e2e-stack.sh down
 
       - name: Upload Playwright report and traces
         if: failure()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: playwright-artifacts-${{ github.run_id }}
           path: |
-            playwright-report/
-            test-results/
+            e2e/playwright-report/
+            e2e/test-results/
           if-no-files-found: ignore
           retention-days: 7
+
+      - name: Push preview image
+        if: steps.gate.outputs.push == 'true'
+        run: |
+          tag="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }}-pr.${{ github.event.pull_request.number }}"
+          docker tag snarvei:ci "$tag"
+          docker push "$tag"
+          echo "Pushed $tag" >> "$GITHUB_STEP_SUMMARY"
