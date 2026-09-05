@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { buildLinksPath, buildOrganizationPath, settingsPath } from "../src/lib/routes";
+import { afterAuthPath, buildLinksPath, buildOrganizationPath, settingsPath } from "../src/lib/routes";
 
 describe("route helpers", () => {
   test("prefers the organization slug over its id", () => {
@@ -14,5 +14,16 @@ describe("route helpers", () => {
 
   test("settings path is fixed", () => {
     expect(settingsPath).toBe("/app/settings");
+  });
+});
+
+describe("afterAuthPath", () => {
+  test("honours in-app destinations only", () => {
+    expect(afterAuthPath("/app/invitations/abc")).toBe("/app/invitations/abc");
+    expect(afterAuthPath("/app")).toBe("/app");
+    expect(afterAuthPath("https://evil.example/app/x")).toBe("/app");
+    expect(afterAuthPath("//evil.example")).toBe("/app");
+    expect(afterAuthPath(null)).toBe("/app");
+    expect(afterAuthPath("/settings")).toBe("/app");
   });
 });

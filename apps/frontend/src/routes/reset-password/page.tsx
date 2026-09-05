@@ -1,27 +1,28 @@
 import { Alert, Box, Button, Card, CardContent, Stack, TextField, Typography } from "@mui/material";
+import { useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
-import { Link as RouterLink, useNavigate, useSearchParams } from "react-router-dom";
-import { authClient } from "../../lib/legacy-auth-client";
+import { errorMessage } from "../../lib/api";
+import { password } from "../../lib/auth-client";
+import { resetPasswordRoute } from "../../router";
 
 export const MIN_PASSWORD_LENGTH = 8;
 
 /**
- * Landing page for the password-reset email. Better Auth verifies the emailed
+ * Landing page for the password-reset email. Limen verifies the emailed
  * token and redirects here with `?token=…` (valid) or `?error=INVALID_TOKEN`.
  */
 export function ResetPasswordPage() {
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
-  const token = searchParams.get("token");
-  const linkError = searchParams.get("error");
-  const [password, setPassword] = useState("");
+  const { token, error: linkError } = resetPasswordRoute.useSearch();
+  const [newPassword, setNewPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
-  const mismatch = confirm.length > 0 && confirm !== password;
-  const tooShort = password.length > 0 && password.length < MIN_PASSWORD_LENGTH;
-  const canSubmit = Boolean(token) && password.length >= MIN_PASSWORD_LENGTH && confirm === password && !submitting;
+  const mismatch = confirm.length > 0 && confirm !== newPassword;
+  const tooShort = newPassword.length > 0 && newPassword.length < MIN_PASSWORD_LENGTH;
+  const canSubmit =
+    Boolean(token) && newPassword.length >= MIN_PASSWORD_LENGTH && confirm === newPassword && !submitting;
 
   const submit = async () => {
     if (!token) {
@@ -29,13 +30,14 @@ export function ResetPasswordPage() {
     }
     setSubmitting(true);
     setError(null);
-    const result = await authClient.resetPassword({ newPassword: password, token });
-    setSubmitting(false);
-    if (result.error) {
-      setError(result.error.message ?? "This reset link is invalid or has expired.");
-      return;
+    try {
+      await password.reset(token, newPassword);
+      void navigate({ to: "/", search: { reset: "done" }, replace: true });
+    } catch (err) {
+      setError(errorMessage(err, "This reset link is invalid or has expired."));
+    } finally {
+      setSubmitting(false);
     }
-    void navigate("/?reset=done", { replace: true });
   };
 
   return (
@@ -49,7 +51,7 @@ export function ResetPasswordPage() {
             {linkError || !token ? (
               <>
                 <Alert severity="error">This password reset link is invalid or has expired.</Alert>
-                <Button component={RouterLink} to="/?forgot=1" variant="contained">
+                <Button variant="contained" onClick={() => void navigate({ to: "/", search: { forgot: "1" } })}>
                   Request a new link
                 </Button>
               </>
@@ -71,8 +73,8 @@ export function ResetPasswordPage() {
                   <TextField
                     label="New password"
                     type="password"
-                    value={password}
-                    onChange={(event) => setPassword(event.target.value)}
+                    value={newPassword}
+                    onChange={(event) => setNewPassword(event.target.value)}
                     autoComplete="new-password"
                     required
                     fullWidth

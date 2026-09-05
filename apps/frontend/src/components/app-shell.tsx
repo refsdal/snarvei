@@ -18,11 +18,12 @@ import {
   Stack,
   Typography,
 } from "@mui/material";
-import { useEffect } from "react";
-import { Link, Outlet, useLocation, useNavigate, useParams } from "react-router-dom";
-import { useWorkspace } from "../hooks/use-workspace-context";
-import { buildOrganizationPath, getOrganizationPathSegment, settingsPath } from "../lib/routes";
-import type { OrganizationSummary } from "../types";
+import { Link, Outlet, useLocation, useNavigate, useParams } from "@tanstack/react-router";
+import { signOut } from "../lib/auth-client";
+import type { Organization } from "../lib/data";
+import { useMe, useOrganizations, useSwitchOrganization } from "../lib/data";
+import { getOrganizationPathSegment, orgParams, settingsPath } from "../lib/routes";
+import { useMessage } from "./message-context";
 
 const drawerWidth = 280;
 
@@ -37,9 +38,12 @@ const matchesNavItem = (pathname: string, to?: string) => {
 export function AppShell() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { org } = useParams();
-  const { activeOrganizationId, message, organizations, session, setMessage, signOut, switchOrganization } =
-    useWorkspace();
+  const { org } = useParams({ strict: false });
+  const { data: me } = useMe();
+  const { data: organizations = [] } = useOrganizations();
+  const { message, setMessage } = useMessage();
+  const switchOrganization = useSwitchOrganization();
+  const activeOrganizationId = me?.session.activeOrganizationId ?? null;
   const activeOrganization = organizations.find((organization) => organization.id === activeOrganizationId) ?? null;
   const currentOrgSegment = org ?? getOrganizationPathSegment(activeOrganization);
   const navItems = [
@@ -60,21 +64,6 @@ export function AppShell() {
     },
     { to: settingsPath, label: "Settings", icon: <SettingsOutlinedIcon /> },
   ];
-
-  useEffect(() => {
-    if (!org || !organizations.length) {
-      return;
-    }
-
-    const routeOrganization = organizations.find(
-      (organization) => organization.slug === org || organization.id === org,
-    );
-    if (!routeOrganization || routeOrganization.id === activeOrganizationId) {
-      return;
-    }
-
-    void switchOrganization(routeOrganization.id);
-  }, [activeOrganizationId, org, organizations, switchOrganization]);
 
   return (
     <Box sx={{ minHeight: "100vh", background: "#070b16", display: "flex" }}>
@@ -156,33 +145,33 @@ export function AppShell() {
               onChange={(event) => {
                 const organizationId = event.target.value;
                 if (typeof organizationId === "string" && organizationId) {
-                  void switchOrganization(organizationId).then(() => {
-                    const nextOrganization = organizations.find((organization) => organization.id === organizationId);
-                    void navigate(buildOrganizationPath(nextOrganization));
+                  const nextOrganization = organizations.find((organization) => organization.id === organizationId);
+                  void switchOrganization.mutateAsync(organizationId).then(() => {
+                    void navigate({ to: "/app/$org", params: orgParams(nextOrganization) });
                   });
                 }
               }}
             >
-              {organizations.map((organization: OrganizationSummary) => (
+              {organizations.map((organization: Organization) => (
                 <MenuItem key={organization.id} value={organization.id}>
                   {organization.name}
                 </MenuItem>
               ))}
             </Select>
             <Stack direction="row" spacing={1.5} sx={{ alignItems: "center", pt: 1 }}>
-              <Avatar src={session?.user.image ?? undefined} sx={{ bgcolor: "primary.main" }}>
-                {session?.user.name?.[0]?.toUpperCase() ?? "S"}
+              <Avatar src={me?.user.image ?? undefined} sx={{ bgcolor: "primary.main" }}>
+                {me?.user.name?.[0]?.toUpperCase() ?? "S"}
               </Avatar>
               <Box sx={{ minWidth: 0, flexGrow: 1 }}>
                 <Typography sx={{ fontWeight: 700 }} noWrap>
-                  {session?.user.name ?? "Signed in user"}
+                  {me?.user.name ?? "Signed in user"}
                 </Typography>
                 <Typography variant="body2" color="text.secondary" noWrap>
-                  {session?.user.email ?? ""}
+                  {me?.user.email ?? ""}
                 </Typography>
               </Box>
               <ListItemButton
-                onClick={() => void signOut().then(() => navigate("/"))}
+                onClick={() => void signOut().then(() => navigate({ to: "/" }))}
                 sx={{ borderRadius: 2, width: "auto", px: 1 }}
                 aria-label="Sign out"
               >
