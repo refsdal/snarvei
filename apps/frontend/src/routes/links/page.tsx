@@ -1,13 +1,13 @@
 import AddIcon from "@mui/icons-material/Add";
-import { Box, Button, Paper, Stack, Typography } from "@mui/material";
+import { Box, Button, FormControl, InputLabel, MenuItem, Paper, Select, Stack, Typography } from "@mui/material";
 import { DataGrid, type GridColDef, type GridRenderCellParams, type GridRowParams, Toolbar } from "@mui/x-data-grid";
 import { useMemo, useState } from "react";
-import { useMessage } from "../../components/message-context";
 import { CopyButton } from "../../components/copy-button";
 import { CreateLinkDialog } from "../../components/dialogs";
+import { useMessage } from "../../components/message-context";
 import { ApiError, errorMessage } from "../../lib/api";
 import { useCreateLink, useLinks, useTeams } from "../../lib/data";
-import { buildLinksPath } from "../../lib/routes";
+import { orgParams } from "../../lib/routes";
 import { linksRoute, orgRoute } from "../../router";
 
 export function LinksPage() {
@@ -63,7 +63,7 @@ export function LinksPage() {
   );
 
   const handleRowClick = (params: GridRowParams) => {
-    void navigate({ to: buildLinksPath(organization, String(params.id)) });
+    void navigate({ to: "/app/$org/links/$linkId", params: { ...orgParams(organization), linkId: String(params.id) } });
   };
 
   return (
@@ -79,7 +79,32 @@ export function LinksPage() {
           </Typography>
           <Typography color="text.secondary">{`Showing links you can access in ${organization.name}.`}</Typography>
         </Box>
-        <Stack direction="row" spacing={1}>
+        <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
+          {(teams.data?.length ?? 0) >= 2 ? (
+            <FormControl size="small" sx={{ minWidth: 180 }}>
+              <InputLabel id="links-team-filter-label">Team</InputLabel>
+              <Select
+                labelId="links-team-filter-label"
+                label="Team"
+                value={teamId ?? ""}
+                inputProps={{ "data-testid": "links-team-filter" }}
+                onChange={(event) => {
+                  const value = event.target.value;
+                  void navigate({
+                    to: ".",
+                    search: (prev) => ({ ...prev, teamId: value || undefined, page: undefined }),
+                  });
+                }}
+              >
+                <MenuItem value="">All teams</MenuItem>
+                {teams.data?.map((team) => (
+                  <MenuItem key={team.id} value={team.id}>
+                    {team.name}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+          ) : null}
           <Button
             variant="contained"
             startIcon={<AddIcon />}
@@ -134,7 +159,7 @@ export function LinksPage() {
               slug: values.slug || undefined,
             });
             setMessage({ severity: "success", text: "Short link created." });
-            void navigate({ to: buildLinksPath(organization, link.id) });
+            void navigate({ to: "/app/$org/links/$linkId", params: { ...orgParams(organization), linkId: link.id } });
             return true;
           } catch (err) {
             if (err instanceof ApiError && err.code === "SLUG_TAKEN") {

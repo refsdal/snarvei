@@ -3,7 +3,7 @@ import PersonAddAlt1Icon from "@mui/icons-material/PersonAddAlt1";
 import { Alert, Box, Button, Card, CardContent, CircularProgress, Paper, Stack, Typography } from "@mui/material";
 import { useNavigate } from "@tanstack/react-router";
 import { useInvitations, useLinks, useMembers, useTeams } from "../../lib/data";
-import { buildLinksPath, buildOrganizationPath } from "../../lib/routes";
+import { orgParams } from "../../lib/routes";
 import { orgRoute } from "../../router";
 
 const StatCard = (props: { label: string; value: number; testId: string }) => (
@@ -44,7 +44,7 @@ export function DashboardPage() {
           <Button
             variant="outlined"
             startIcon={<PersonAddAlt1Icon />}
-            onClick={() => navigate({ to: buildOrganizationPath(organization, "organization") })}
+            onClick={() => navigate({ to: "/app/$org/organization", params: orgParams(organization) })}
           >
             Invite member
           </Button>
@@ -52,7 +52,7 @@ export function DashboardPage() {
             variant="contained"
             startIcon={<AddIcon />}
             disabled={!teams.data?.length}
-            onClick={() => navigate({ to: buildLinksPath(organization) })}
+            onClick={() => navigate({ to: "/app/$org/links", params: orgParams(organization) })}
           >
             Create link
           </Button>
@@ -72,7 +72,7 @@ export function DashboardPage() {
             <Typography variant="h6" sx={{ fontWeight: 700 }}>
               Recent links
             </Typography>
-            <Button size="small" onClick={() => navigate({ to: buildLinksPath(organization) })}>
+            <Button size="small" onClick={() => navigate({ to: "/app/$org/links", params: orgParams(organization) })}>
               View all
             </Button>
           </Stack>
@@ -89,7 +89,9 @@ export function DashboardPage() {
               <Paper
                 key={link.id}
                 sx={{ p: 2, border: "1px solid rgba(255,255,255,0.06)", cursor: "pointer" }}
-                onClick={() => navigate({ to: buildLinksPath(organization, link.id) })}
+                onClick={() =>
+                  navigate({ to: "/app/$org/links/$linkId", params: { ...orgParams(organization), linkId: link.id } })
+                }
               >
                 <Stack direction={{ xs: "column", sm: "row" }} spacing={1} sx={{ justifyContent: "space-between" }}>
                   <Box sx={{ minWidth: 0 }}>

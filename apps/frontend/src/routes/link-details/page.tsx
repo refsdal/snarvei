@@ -18,7 +18,7 @@ import { EditLinkDialog } from "../../components/dialogs";
 import { useMessage } from "../../components/message-context";
 import { ApiError, errorMessage } from "../../lib/api";
 import { useDeleteLink, useLink, useUpdateLink } from "../../lib/data";
-import { buildLinksPath } from "../../lib/routes";
+import { orgParams } from "../../lib/routes";
 import { linkDetailsRoute, orgRoute } from "../../router";
 import { NotFound } from "../../components/route-error";
 import { LinkAnalyticsCard, LinkHistoryCard } from "./components";
@@ -62,7 +62,7 @@ export function LinkDetailsPage() {
         <Box>
           <Button
             startIcon={<ArrowBackRoundedIcon />}
-            onClick={() => navigate({ to: buildLinksPath(organization) })}
+            onClick={() => navigate({ to: "/app/$org/links", params: orgParams(organization) })}
             sx={{ mb: 1, px: 0 }}
           >
             Back to links
@@ -157,7 +157,7 @@ export function LinkDetailsPage() {
           try {
             await deleteLink.mutateAsync(data.id);
             setMessage({ severity: "success", text: "Link deleted." });
-            void navigate({ to: buildLinksPath(organization) });
+            void navigate({ to: "/app/$org/links", params: orgParams(organization) });
             return true;
           } catch (err) {
             setMessage({ severity: "error", text: errorMessage(err, "Unable to delete the selected link.") });
