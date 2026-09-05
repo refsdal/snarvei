@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"errors"
+	"math"
 	"net/http"
 	"strings"
 
@@ -38,7 +39,11 @@ func pageParams(page, pageSize *int) (p int, size int, offset int32, limit int32
 	if p < 1 || size < 1 || size > maxPageSize {
 		return 0, 0, 0, 0, fail(http.StatusBadRequest, "VALIDATION_FAILED", "page must be >= 1 and pageSize 1..500")
 	}
-	return p, size, int32((p - 1) * size), int32(size), nil
+	off64 := int64(p-1) * int64(size)
+	if off64 > math.MaxInt32 {
+		return 0, 0, 0, 0, fail(http.StatusBadRequest, "VALIDATION_FAILED", "page too large")
+	}
+	return p, size, int32(off64), int32(size), nil
 }
 
 func toLink(r dbgen.GetLinkRow) gen.Link {

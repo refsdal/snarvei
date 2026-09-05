@@ -7,6 +7,21 @@
   </head>
   <body>
     <script id="api-reference" data-url="/openapi.json"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@scalar/api-reference"></script>
+    <!--
+      Pinned to an exact version with Subresource Integrity: this page is
+      served from the app origin and Scalar's "try it" sends the session
+      cookie, so an unpinned "latest" bundle would be a supply-chain risk.
+      To bump: pick the new version (curl -s
+      https://data.jsdelivr.com/v1/package/npm/@scalar/api-reference |
+      jq -r .tags.latest), then recompute the hash (curl -s
+      https://cdn.jsdelivr.net/npm/@scalar/api-reference@<version>/dist/browser/standalone.js
+      | openssl dgst -sha384 -binary | openssl base64 -A) and update both the
+      version in the URL and the integrity attribute below.
+    -->
+    <script
+      src="https://cdn.jsdelivr.net/npm/@scalar/api-reference@1.67.0/dist/browser/standalone.js"
+      integrity="sha384-6c7Vmx+i0yi8gBbltn0x1cavD+zsMGw2xmXXVyacPJLIGBxwaVimW5TW0WiW17Ir"
+      crossorigin="anonymous"
+    ></script>
   </body>
 </html>

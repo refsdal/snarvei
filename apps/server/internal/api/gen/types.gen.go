@@ -409,11 +409,14 @@ type CreateLinkJSONBodyRedirectStatus int
 
 // UpdateLinkJSONBody defines parameters for UpdateLink.
 type UpdateLinkJSONBody struct {
+	// Description Send an empty string to clear; null is treated as omitted (keeps the current value).
 	Description    *string                           `json:"description,omitempty"`
 	IsActive       *bool                             `json:"isActive,omitempty"`
 	RedirectStatus *UpdateLinkJSONBodyRedirectStatus `json:"redirectStatus,omitempty"`
 	TargetUrl      *string                           `json:"targetUrl,omitempty"`
-	Title          *string                           `json:"title,omitempty"`
+
+	// Title Send an empty string to clear; null is treated as omitted (keeps the current value).
+	Title *string `json:"title,omitempty"`
 }
 
 // UpdateLinkJSONBodyRedirectStatus defines parameters for UpdateLink.

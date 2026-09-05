@@ -14,6 +14,7 @@ func (d Deps) mountDocs(mux *http.ServeMux, specJSON []byte) {
 	mux.HandleFunc("GET /openapi.json", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.Header().Set("Cache-Control", "public, max-age=300")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
 		_, _ = w.Write(specJSON)
 	})
 	mux.HandleFunc("GET /scalar", func(w http.ResponseWriter, r *http.Request) {

@@ -136,9 +136,15 @@ func TestGetUpdateDeleteLink(t *testing.T) {
 	if hist.JSON["total"] != float64(2) || items[0].(map[string]any)["oldTargetUrl"] != "https://example.com/v1" || items[0].(map[string]any)["newTargetUrl"] != "https://example.com/v2" {
 		t.Fatalf("history: %s", hist.Body)
 	}
-	// blank clears, null clears, absent keeps
+	// blank clears; JSON null and an absent field both keep the current value
 	if resp := f.a.Do(http.MethodPatch, "/api/links/"+id, map[string]any{"title": "", "description": "  "}, f.owner); resp.JSON["title"] != nil || resp.JSON["description"] != nil {
 		t.Fatalf("clear: %s", resp.Body)
+	}
+	if resp := f.a.Do(http.MethodPatch, "/api/links/"+id, map[string]any{"title": "Kept"}, f.owner); resp.Code != 200 || resp.JSON["title"] != "Kept" {
+		t.Fatalf("set title: %d %s", resp.Code, resp.Body)
+	}
+	if resp := f.a.Do(http.MethodPatch, "/api/links/"+id, map[string]any{"isActive": true}, f.owner); resp.Code != 200 || resp.JSON["title"] != "Kept" {
+		t.Fatalf("PATCH without title must keep the current value: %d %s", resp.Code, resp.Body)
 	}
 	if resp := f.a.Do(http.MethodPatch, "/api/links/"+id, map[string]any{"targetUrl": "javascript:alert(1)"}, f.owner); resp.Code != 400 {
 		t.Fatalf("bad retarget: %d", resp.Code)
@@ -220,6 +226,9 @@ func TestListLinksScopingAndPaging(t *testing.T) {
 	}
 	if resp := f.a.Do(http.MethodGet, "/api/links?organizationId="+f.orgID+"&pageSize=9999", nil, f.owner); resp.Code != 400 {
 		t.Fatalf("pageSize cap: %d", resp.Code)
+	}
+	if resp := f.a.Do(http.MethodGet, "/api/links?organizationId="+f.orgID+"&page=5000000&pageSize=500", nil, f.owner); resp.Code != 400 {
+		t.Fatalf("offset overflow must be 400, not 500: %d", resp.Code)
 	}
 	if resp := f.a.Do(http.MethodGet, "/api/links", nil, f.owner); resp.Code != 400 {
 		t.Fatalf("missing organizationId: %d", resp.Code)

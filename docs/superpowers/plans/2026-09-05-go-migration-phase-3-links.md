@@ -2108,7 +2108,7 @@ Do not push; the controller runs the whole-branch review and opens the PR (base 
 
 **Spec coverage (phase 3 in section 11 and the cited sections):** links CRUD with generated/custom slugs, `409 SLUG_TAKEN`, target rules, slug immutability (T1, T5); history (T5); analytics with `days` (T6, section 5); redirect semantics, no-store, 404 text, rate limit, click privacy, async recorder with drain on shutdown (T2, T6, sections 3 and 5); Scalar + `/openapi.json` public with the Scalar CSP exception (T6, section 2); `POST /api/links` on the shared write limit (T4 tiers); tenancy rules on every link route (T4 resolver, T5, T6 tests); Playwright flows and CI smoke (T7).
 
-**Deviations decided here:** (1) the spec's "same shape as today" for analytics is kept minus geo columns, with `topReferrers`/`topCountries` capped at 10 per section 5 (today's app used 5); (2) `GET /l/{slug}` is hand-routed and not in the OpenAPI document (a redirect is not a JSON operation); (3) paging is page/pageSize per spec section 2 rather than the old keyset cursor; (4) `http.Redirect`'s small HTML body is accepted.
+**Deviations decided here:** (1) the spec's "same shape as today" for analytics is kept minus geo columns, with `topReferrers`/`topCountries` capped at 10 per section 5 (today's app used 5); (2) `GET /l/{slug}` is hand-routed and not in the OpenAPI document (a redirect is not a JSON operation); (3) paging is page/pageSize per spec section 2 rather than the old keyset cursor; (4) `http.Redirect`'s small HTML body is accepted; (5) `POST /api/links` takes `teamId` only; the organization is derived from the team.
 
 **Placeholder scan:** none; generated-name notes point at concrete files.
 

@@ -11,14 +11,14 @@ import (
 func TestOpenAPIAndScalarArePublic(t *testing.T) {
 	a := testrig.App(t)
 	spec := a.Do(http.MethodGet, "/openapi.json", nil, "")
-	if spec.Code != 200 || !strings.HasPrefix(spec.Header.Get("Content-Type"), "application/json") || spec.JSON["openapi"] == nil {
+	if spec.Code != 200 || !strings.HasPrefix(spec.Header.Get("Content-Type"), "application/json") || spec.JSON["openapi"] == nil || spec.Header.Get("X-Content-Type-Options") != "nosniff" {
 		t.Fatalf("openapi.json: %d %s", spec.Code, spec.Header.Get("Content-Type"))
 	}
 	if paths := spec.JSON["paths"].(map[string]any); paths["/api/links"] == nil || paths["/api/auth/signin/credential"] != nil {
 		t.Fatalf("paths: %v", paths)
 	}
 	page := a.Do(http.MethodGet, "/scalar", nil, "")
-	if page.Code != 200 || !strings.HasPrefix(page.Header.Get("Content-Type"), "text/html") || !strings.Contains(string(page.Body), "/openapi.json") || !strings.Contains(string(page.Body), "cdn.jsdelivr.net") {
+	if page.Code != 200 || !strings.HasPrefix(page.Header.Get("Content-Type"), "text/html") || !strings.Contains(string(page.Body), "/openapi.json") || !strings.Contains(string(page.Body), "cdn.jsdelivr.net") || !strings.Contains(string(page.Body), `integrity="sha384-`) {
 		t.Fatalf("scalar: %d %s", page.Code, page.Body)
 	}
 	csp := page.Header.Get("Content-Security-Policy")

@@ -74,8 +74,31 @@ func TestRedirectIsRateLimited(t *testing.T) {
 		if i < 100 && rec.Code != 404 {
 			t.Fatalf("hit %d: %d", i, rec.Code)
 		}
-		if i == 100 && (rec.Code != 429 || rec.Header().Get("Retry-After") == "") {
-			t.Fatalf("hit 101: %d", rec.Code)
+		if i == 100 && (rec.Code != 429 || rec.Header().Get("Retry-After") == "" || rec.Header().Get("Cache-Control") != "no-store") {
+			t.Fatalf("hit 101: %d %q", rec.Code, rec.Header().Get("Cache-Control"))
 		}
+	}
+}
+
+func TestRedirectHeadDoesNotRecordClicks(t *testing.T) {
+	f := newLinkFixture(t)
+	created := f.create(t, f.owner, map[string]any{"targetUrl": "https://example.com/landing"})
+	slug, id := created.JSON["slug"].(string), created.JSON["id"].(string)
+
+	req := httptest.NewRequest(http.MethodHead, "/l/"+slug, nil)
+	req.RemoteAddr = "203.0.113.5:1234"
+	rec := f.a.DoRaw(req)
+	if rec.Code != 302 || rec.Header().Get("Location") != "https://example.com/landing" {
+		t.Fatalf("head redirect: %d %q", rec.Code, rec.Header().Get("Location"))
+	}
+	if !f.a.Clicks.Drain(5 * time.Second) {
+		t.Fatal("drain")
+	}
+	var n int
+	if err := f.a.Rig.Pool.QueryRow(context.Background(), `SELECT count(*) FROM click_events WHERE link_id = $1`, id).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Fatalf("HEAD must not record a click: %d", n)
 	}
 }

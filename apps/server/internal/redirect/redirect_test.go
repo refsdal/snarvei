@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/refsdal/snarvei/server/internal/auth"
 	"github.com/refsdal/snarvei/server/internal/db/gen"
@@ -49,6 +50,12 @@ func TestSanitizers(t *testing.T) {
 	}
 	if redirect.SanitizeUserAgent("") != nil {
 		t.Error("empty user agent must be nil")
+	}
+	// A multibyte rune ("€", 3 bytes) straddling the 256-byte cut must not
+	// leave an invalid trailing sequence.
+	straddling := strings.Repeat("a", 255) + "€"
+	if got := str(redirect.SanitizeUserAgent(straddling)); !utf8.ValidString(got) {
+		t.Errorf("truncated user agent is not valid UTF-8: %q", got)
 	}
 }
 

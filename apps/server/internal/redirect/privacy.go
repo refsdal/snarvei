@@ -78,13 +78,15 @@ func SanitizeReferer(raw string) *string {
 	return &out
 }
 
-// SanitizeUserAgent caps the user agent.
+// SanitizeUserAgent caps the user agent. Truncation is byte-based, so
+// ToValidUTF8 drops any rune left split at the boundary rather than letting
+// the invalid tail reach Postgres (which would reject the whole insert).
 func SanitizeUserAgent(raw string) *string {
 	if raw == "" {
 		return nil
 	}
 	if len(raw) > maxUserAgent {
-		raw = raw[:maxUserAgent]
+		raw = strings.ToValidUTF8(raw[:maxUserAgent], "")
 	}
 	return &raw
 }

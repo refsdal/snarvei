@@ -231,8 +231,8 @@ Links:
   title, description, optional slug) → generated slug retries on collision;
   a taken custom slug is `409 SLUG_TAKEN`. Slug rules unchanged
   (`^[a-z0-9]+(?:-[a-z0-9]+)*$`, 3–64, lower-cased, trimmed). Target URL rules
-  unchanged (absolute http/https, no credentials, no loopback or private
-  hosts).
+  unchanged (absolute http/https with a host, no embedded credentials; the
+  server never fetches the target, so there is no private-host restriction).
 - `GET /api/links/{id}`, `PATCH /api/links/{id}` (targetUrl, redirectStatus,
   isActive, title, description; never slug), `DELETE /api/links/{id}`.
 - `GET /api/links/{id}/history` → target changes newest first.

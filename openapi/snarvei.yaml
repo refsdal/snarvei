@@ -472,8 +472,8 @@ paths:
                 targetUrl: { type: string, minLength: 1, maxLength: 2048 }
                 redirectStatus: { type: integer, enum: [301, 302, 307] }
                 isActive: { type: boolean }
-                title: { type: string, maxLength: 200, nullable: true }
-                description: { type: string, maxLength: 2000, nullable: true }
+                title: { type: string, maxLength: 200, nullable: true, description: "Send an empty string to clear; null is treated as omitted (keeps the current value)." }
+                description: { type: string, maxLength: 2000, nullable: true, description: "Send an empty string to clear; null is treated as omitted (keeps the current value)." }
       responses:
         "200": { description: Updated., content: { application/json: { schema: { $ref: "#/components/schemas/Link" } } } }
         "400": { $ref: "#/components/responses/ValidationFailed" }

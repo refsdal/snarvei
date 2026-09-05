@@ -21,11 +21,16 @@ const (
 // limited per hashed address, never cached.
 func (d Deps) mountRedirect(mux *http.ServeMux) {
 	limited := middleware.RateLimit(d.mwDeps(), "redirect", redirectLimit, redirectWindow)
-	mux.Handle("GET /l/{slug}", limited(http.HandlerFunc(d.followLink)))
+	noStore := func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Cache-Control", "no-store")
+			next.ServeHTTP(w, r)
+		})
+	}
+	mux.Handle("GET /l/{slug}", noStore(limited(http.HandlerFunc(d.followLink))))
 }
 
 func (d Deps) followLink(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Cache-Control", "no-store")
 	slug := r.PathValue("slug")
 	link, err := d.Q.GetActiveLinkBySlug(r.Context(), slug)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -40,6 +45,12 @@ func (d Deps) followLink(w http.ResponseWriter, r *http.Request) {
 	}
 	status := int(link.RedirectStatus)
 	http.Redirect(w, r, link.TargetUrl, status)
+
+	if r.Method == http.MethodHead {
+		// Go 1.22 GET patterns also match HEAD; link checkers and previewers
+		// must not inflate click analytics.
+		return
+	}
 
 	// Recorded after the redirect is written; the recorder owns the goroutine
 	// so this never delays the response to the caller.
