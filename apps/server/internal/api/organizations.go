@@ -12,8 +12,6 @@ import (
 
 var slugPattern = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
 
-func (d Deps) mountTestHooks(*http.ServeMux) {} // replaced in Task 11
-
 func (d Deps) ListOrganizations(ctx context.Context, _ gen.ListOrganizationsRequestObject) (gen.ListOrganizationsResponseObject, error) {
 	s := middleware.SessionFromContext(ctx)
 	rows, err := d.Q.ListOrganizationsForUser(ctx, s.UserID)
