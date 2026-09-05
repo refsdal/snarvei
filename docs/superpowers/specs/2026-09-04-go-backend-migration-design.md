@@ -367,7 +367,7 @@ Limen-shaped tables copied from Pjokk's `00001_init.sql` and
 `00002_limen_align.sql` (already runtime-verified there against Limen's own
 schema discovery): `users` (with Snarvei's `name`, `image`), `sessions` (with
 `active_organization_id`), `accounts`, `verifications`, `organizations`,
-`organization_members`, `organization_member_roles`, `organization_roles`,
+`organization_members`, `organization_member_roles`,
 `organization_invitations`, `rate_limits`, and the two-factor plugin's tables.
 Pjokk-only columns (`plan`, `role`, `banned`, `ban_reason`, impersonation) are
 not carried over.
