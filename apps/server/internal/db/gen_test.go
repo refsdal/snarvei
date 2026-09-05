@@ -46,15 +46,42 @@ func TestSqlcOutputIsUpToDate(t *testing.T) {
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("sqlc generate: %v\n%s", err, out)
 	}
-	entries, err := os.ReadDir(tmp)
+	fresh, err := os.ReadDir(tmp)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, e := range entries {
-		want, _ := os.ReadFile(filepath.Join(tmp, e.Name()))
-		got, err := os.ReadFile(filepath.Join("gen", e.Name()))
-		if err != nil || string(want) != string(got) {
-			t.Fatalf("internal/db/gen/%s is stale: run `go generate ./...` from apps/server and commit", e.Name())
+	committed, err := os.ReadDir("gen")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Compare the UNION of both listings: checking only the fresh output's
+	// names (as an earlier version of this test did) misses a file that is
+	// committed under gen/ but that a fresh `sqlc generate` no longer
+	// produces — a deleted query, or a renamed one whose generated filename
+	// changed.
+	names := map[string]struct{}{}
+	for _, e := range fresh {
+		if !e.IsDir() && filepath.Ext(e.Name()) == ".go" {
+			names[e.Name()] = struct{}{}
+		}
+	}
+	for _, e := range committed {
+		if !e.IsDir() && filepath.Ext(e.Name()) == ".go" {
+			names[e.Name()] = struct{}{}
+		}
+	}
+	for name := range names {
+		want, wantErr := os.ReadFile(filepath.Join(tmp, name))
+		got, gotErr := os.ReadFile(filepath.Join("gen", name))
+		switch {
+		case wantErr != nil && gotErr == nil:
+			t.Fatalf("internal/db/gen/%s is orphaned (committed but a fresh sqlc generate no longer produces it): run `go generate ./...` from apps/server and commit", name)
+		case wantErr == nil && gotErr != nil:
+			t.Fatalf("internal/db/gen/%s is missing (a fresh sqlc generate produces it but it is not committed): run `go generate ./...` from apps/server and commit", name)
+		case wantErr != nil && gotErr != nil:
+			t.Fatalf("internal/db/gen/%s: could not read either side (fresh: %v, committed: %v)", name, wantErr, gotErr)
+		case string(want) != string(got):
+			t.Fatalf("internal/db/gen/%s is stale: run `go generate ./...` from apps/server and commit", name)
 		}
 	}
 }
