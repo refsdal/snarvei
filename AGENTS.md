@@ -5,7 +5,9 @@
 > the current phase plan is under `docs/superpowers/plans/`. Backend: `apps/server`
 > (Go); frontend: `apps/frontend`; build: `scripts/build-artifacts.sh`. Phase 2
 > (auth, organizations, teams, invitations, profile, email, storage) is
-> implemented; see the OpenAPI spec for the live routes.
+> implemented; see the OpenAPI spec for the live routes. Phase 3 (links, the
+> /l/{slug} redirect with click analytics, /openapi.json and /scalar) is
+> implemented.
 
 # AGENTS.md
 

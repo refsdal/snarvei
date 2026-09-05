@@ -23,6 +23,7 @@ import (
 	dbgen "github.com/refsdal/snarvei/server/internal/db/gen"
 	"github.com/refsdal/snarvei/server/internal/email"
 	"github.com/refsdal/snarvei/server/internal/ratelimit"
+	"github.com/refsdal/snarvei/server/internal/redirect"
 	"github.com/refsdal/snarvei/server/internal/storage"
 )
 
@@ -43,6 +44,7 @@ type Deps struct {
 	Mail      *email.Recording
 	RateLimit ratelimit.Store
 	Hasher    *clientip.Hasher
+	Clicks    *redirect.Recorder
 	Log       *slog.Logger
 
 	AppURL           string
@@ -126,13 +128,19 @@ func noStore(next http.Handler) http.Handler {
 func NewHandler(d Deps) http.Handler {
 	spec := loadSpec()
 	assertTierCoverage(spec)
-	if d.Auth == nil || d.Q == nil || d.RateLimit == nil || d.Hasher == nil || d.Storage == nil || d.Email == nil {
-		panic("api: NewHandler needs Auth, Q, RateLimit, Hasher, Storage and Email")
+	if d.Auth == nil || d.Q == nil || d.RateLimit == nil || d.Hasher == nil || d.Storage == nil || d.Email == nil || d.Clicks == nil {
+		panic("api: NewHandler needs Auth, Q, RateLimit, Hasher, Storage, Email and Clicks")
+	}
+	specJSON, err := spec.MarshalJSON()
+	if err != nil {
+		panic(fmt.Sprintf("api: marshal embedded spec: %v", err))
 	}
 
 	mux := http.NewServeMux()
 	mux.Handle(auth.BasePath+"/", d.Auth.Handler())
 	d.mountImageRoutes(mux)
+	d.mountRedirect(mux)
+	d.mountDocs(mux, specJSON)
 	if d.TestHooks {
 		d.mountTestHooks(mux)
 	}

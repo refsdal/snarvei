@@ -2,6 +2,7 @@ package middleware_test
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -188,6 +189,41 @@ func TestRequireTeam(t *testing.T) {
 	}
 	if rec := get(adminH, pattern, path, ownerCookie); rec.Code != 200 {
 		t.Fatalf("owner on team admin route: %d", rec.Code)
+	}
+}
+
+func TestResolveTeamAccess(t *testing.T) {
+	f := setup(t)
+	ctx := context.Background()
+	ownerID, _ := f.user("Owner", "owner@example.com")
+	memberID, _ := f.user("Member", "member@example.com")
+	outsiderID, _ := f.user("Outsider", "outsider@example.com")
+	strangerID, _ := f.user("Stranger", "stranger@example.com")
+	org, _ := f.d.Auth.CreateOrganization(ctx, ownerID, "Acme", "acme")
+	for _, u := range []struct{ id, mail string }{{memberID, "member@example.com"}, {outsiderID, "outsider@example.com"}} {
+		inv, _ := f.d.Auth.CreateInvitation(ctx, ownerID, org.ID, u.mail, "member")
+		if _, err := f.d.Auth.AcceptInvitation(ctx, u.id, inv.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	team, _ := f.d.Q.CreateTeam(ctx, gen.CreateTeamParams{ID: auth.NewID(), OrganizationID: org.ID, Name: "Marketing"})
+	_ = f.d.Q.AddTeamMember(ctx, gen.AddTeamMemberParams{TeamID: team.ID, UserID: memberID})
+
+	if _, err := middleware.ResolveTeamAccess(ctx, f.d, ownerID, "nope"); !errors.Is(err, middleware.ErrTeamNotFound) {
+		t.Fatalf("unknown team: %v", err)
+	}
+	for _, uid := range []string{outsiderID, strangerID} {
+		if _, err := middleware.ResolveTeamAccess(ctx, f.d, uid, team.ID); !errors.Is(err, middleware.ErrTeamForbidden) {
+			t.Fatalf("%s: %v", uid, err)
+		}
+	}
+	tc, err := middleware.ResolveTeamAccess(ctx, f.d, memberID, team.ID)
+	if err != nil || !tc.IsTeamMember || tc.Role != "member" || tc.OrgID != org.ID {
+		t.Fatalf("member: %+v %v", tc, err)
+	}
+	tc, err = middleware.ResolveTeamAccess(ctx, f.d, ownerID, team.ID)
+	if err != nil || tc.IsTeamMember || tc.Role != "owner" {
+		t.Fatalf("owner: %+v %v", tc, err)
 	}
 }
 

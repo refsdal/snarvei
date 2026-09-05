@@ -56,7 +56,11 @@ test("probes and public config answer JSON", async ({ request }) => {
 });
 
 test("unknown server-owned paths answer a JSON 404", async ({ request }) => {
-  for (const path of ["/api/nope", "/l/does-not-exist", "/openapi.json", "/images/profile/x.png"]) {
+  // /l/{slug} and /openapi.json are now real, documented routes (phase 3)
+  // with their own status/content-type on an unknown slug or a real spec
+  // fetch, so they no longer belong in this "unknown path" list; they are
+  // covered by links-api.spec.ts and the CI smoke curls instead.
+  for (const path of ["/api/nope", "/images/profile/x.png"]) {
     const response = await request.get(path);
     expect(response.status(), path).toBe(404);
     expect(response.headers()["content-type"], path).toContain("application/json");

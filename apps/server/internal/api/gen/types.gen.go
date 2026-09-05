@@ -9,6 +9,27 @@ import (
 	openapi_types "github.com/oapi-codegen/runtime/types"
 )
 
+// Defines values for LinkRedirectStatus.
+const (
+	LinkRedirectStatusN301 LinkRedirectStatus = 301
+	LinkRedirectStatusN302 LinkRedirectStatus = 302
+	LinkRedirectStatusN307 LinkRedirectStatus = 307
+)
+
+// Valid indicates whether the value is a known member of the LinkRedirectStatus enum.
+func (e LinkRedirectStatus) Valid() bool {
+	switch e {
+	case LinkRedirectStatusN301:
+		return true
+	case LinkRedirectStatusN302:
+		return true
+	case LinkRedirectStatusN307:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for OrganizationRole.
 const (
 	OrganizationRoleAdmin  OrganizationRole = "admin"
@@ -24,6 +45,48 @@ func (e OrganizationRole) Valid() bool {
 	case OrganizationRoleMember:
 		return true
 	case OrganizationRoleOwner:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CreateLinkJSONBodyRedirectStatus.
+const (
+	CreateLinkJSONBodyRedirectStatusN301 CreateLinkJSONBodyRedirectStatus = 301
+	CreateLinkJSONBodyRedirectStatusN302 CreateLinkJSONBodyRedirectStatus = 302
+	CreateLinkJSONBodyRedirectStatusN307 CreateLinkJSONBodyRedirectStatus = 307
+)
+
+// Valid indicates whether the value is a known member of the CreateLinkJSONBodyRedirectStatus enum.
+func (e CreateLinkJSONBodyRedirectStatus) Valid() bool {
+	switch e {
+	case CreateLinkJSONBodyRedirectStatusN301:
+		return true
+	case CreateLinkJSONBodyRedirectStatusN302:
+		return true
+	case CreateLinkJSONBodyRedirectStatusN307:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for UpdateLinkJSONBodyRedirectStatus.
+const (
+	UpdateLinkJSONBodyRedirectStatusN301 UpdateLinkJSONBodyRedirectStatus = 301
+	UpdateLinkJSONBodyRedirectStatusN302 UpdateLinkJSONBodyRedirectStatus = 302
+	UpdateLinkJSONBodyRedirectStatusN307 UpdateLinkJSONBodyRedirectStatus = 307
+)
+
+// Valid indicates whether the value is a known member of the UpdateLinkJSONBodyRedirectStatus enum.
+func (e UpdateLinkJSONBodyRedirectStatus) Valid() bool {
+	switch e {
+	case UpdateLinkJSONBodyRedirectStatusN301:
+		return true
+	case UpdateLinkJSONBodyRedirectStatusN302:
+		return true
+	case UpdateLinkJSONBodyRedirectStatusN307:
 		return true
 	default:
 		return false
@@ -108,11 +171,51 @@ func (e Readyz503JSONResponseBodyOk) Valid() bool {
 	}
 }
 
+// Analytics defines model for Analytics.
+type Analytics struct {
+	ClicksByDay []struct {
+		Clicks int    `json:"clicks"`
+		Day    string `json:"day"`
+	} `json:"clicksByDay"`
+	Range struct {
+		From time.Time `json:"from"`
+		To   time.Time `json:"to"`
+	} `json:"range"`
+	TopCountries []struct {
+		Clicks  int     `json:"clicks"`
+		Country *string `json:"country"`
+	} `json:"topCountries"`
+	TopReferrers []struct {
+		Clicks  int     `json:"clicks"`
+		Referer *string `json:"referer"`
+	} `json:"topReferrers"`
+	TotalClicks                int `json:"totalClicks"`
+	UniqueVisitorApproximation int `json:"uniqueVisitorApproximation"`
+}
+
 // Error defines model for Error.
 type Error struct {
 	Code    string                  `json:"code"`
 	Details *map[string]interface{} `json:"details,omitempty"`
 	Message string                  `json:"message"`
+}
+
+// HistoryItem defines model for HistoryItem.
+type HistoryItem struct {
+	ChangedAt    time.Time `json:"changedAt"`
+	ChangedBy    *string   `json:"changedBy"`
+	Id           string    `json:"id"`
+	LinkId       string    `json:"linkId"`
+	NewTargetUrl string    `json:"newTargetUrl"`
+	OldTargetUrl *string   `json:"oldTargetUrl"`
+}
+
+// HistoryPage defines model for HistoryPage.
+type HistoryPage struct {
+	Items    []HistoryItem `json:"items"`
+	Page     int           `json:"page"`
+	PageSize int           `json:"pageSize"`
+	Total    int           `json:"total"`
 }
 
 // Invitation defines model for Invitation.
@@ -125,6 +228,35 @@ type Invitation struct {
 	Status    string     `json:"status"`
 	TeamId    *string    `json:"teamId"`
 	TeamName  *string    `json:"teamName"`
+}
+
+// Link defines model for Link.
+type Link struct {
+	CreatedAt      time.Time          `json:"createdAt"`
+	CreatedBy      *string            `json:"createdBy"`
+	Description    *string            `json:"description"`
+	Id             string             `json:"id"`
+	IsActive       bool               `json:"isActive"`
+	OrganizationId string             `json:"organizationId"`
+	RedirectStatus LinkRedirectStatus `json:"redirectStatus"`
+	Slug           string             `json:"slug"`
+	TargetUrl      string             `json:"targetUrl"`
+	TeamId         string             `json:"teamId"`
+	TeamName       string             `json:"teamName"`
+	Title          *string            `json:"title"`
+	UpdatedAt      time.Time          `json:"updatedAt"`
+	UpdatedBy      *string            `json:"updatedBy"`
+}
+
+// LinkRedirectStatus defines model for Link.RedirectStatus.
+type LinkRedirectStatus int
+
+// LinkPage defines model for LinkPage.
+type LinkPage struct {
+	Items    []Link `json:"items"`
+	Page     int    `json:"page"`
+	PageSize int    `json:"pageSize"`
+	Total    int    `json:"total"`
 }
 
 // Me defines model for Me.
@@ -218,8 +350,17 @@ type User struct {
 // InvitationId defines model for InvitationId.
 type InvitationId = string
 
+// LinkId defines model for LinkId.
+type LinkId = string
+
 // OrgId defines model for OrgId.
 type OrgId = string
+
+// Page defines model for Page.
+type Page = int
+
+// PageSize defines model for PageSize.
+type PageSize = int
 
 // TeamId defines model for TeamId.
 type TeamId = string
@@ -243,6 +384,53 @@ type ValidationFailed = Error
 type RegisterWithInvitationJSONBody struct {
 	Name     string `json:"name"`
 	Password string `json:"password"`
+}
+
+// ListLinksParams defines parameters for ListLinks.
+type ListLinksParams struct {
+	OrganizationId string    `form:"organizationId" json:"organizationId"`
+	TeamId         *string   `form:"teamId,omitempty" json:"teamId,omitempty"`
+	Page           *Page     `form:"page,omitempty" json:"page,omitempty"`
+	PageSize       *PageSize `form:"pageSize,omitempty" json:"pageSize,omitempty"`
+}
+
+// CreateLinkJSONBody defines parameters for CreateLink.
+type CreateLinkJSONBody struct {
+	Description    *string                           `json:"description,omitempty"`
+	RedirectStatus *CreateLinkJSONBodyRedirectStatus `json:"redirectStatus,omitempty"`
+	Slug           *string                           `json:"slug,omitempty"`
+	TargetUrl      string                            `json:"targetUrl"`
+	TeamId         string                            `json:"teamId"`
+	Title          *string                           `json:"title,omitempty"`
+}
+
+// CreateLinkJSONBodyRedirectStatus defines parameters for CreateLink.
+type CreateLinkJSONBodyRedirectStatus int
+
+// UpdateLinkJSONBody defines parameters for UpdateLink.
+type UpdateLinkJSONBody struct {
+	// Description Send an empty string to clear; null is treated as omitted (keeps the current value).
+	Description    *string                           `json:"description,omitempty"`
+	IsActive       *bool                             `json:"isActive,omitempty"`
+	RedirectStatus *UpdateLinkJSONBodyRedirectStatus `json:"redirectStatus,omitempty"`
+	TargetUrl      *string                           `json:"targetUrl,omitempty"`
+
+	// Title Send an empty string to clear; null is treated as omitted (keeps the current value).
+	Title *string `json:"title,omitempty"`
+}
+
+// UpdateLinkJSONBodyRedirectStatus defines parameters for UpdateLink.
+type UpdateLinkJSONBodyRedirectStatus int
+
+// GetLinkAnalyticsParams defines parameters for GetLinkAnalytics.
+type GetLinkAnalyticsParams struct {
+	Days *int `form:"days,omitempty" json:"days,omitempty"`
+}
+
+// ListLinkHistoryParams defines parameters for ListLinkHistory.
+type ListLinkHistoryParams struct {
+	Page     *Page     `form:"page,omitempty" json:"page,omitempty"`
+	PageSize *PageSize `form:"pageSize,omitempty" json:"pageSize,omitempty"`
 }
 
 // DeleteMeJSONBody defines parameters for DeleteMe.
@@ -306,6 +494,12 @@ type Readyz503JSONResponseBodyOk bool
 
 // RegisterWithInvitationJSONRequestBody defines body for RegisterWithInvitation for application/json ContentType.
 type RegisterWithInvitationJSONRequestBody RegisterWithInvitationJSONBody
+
+// CreateLinkJSONRequestBody defines body for CreateLink for application/json ContentType.
+type CreateLinkJSONRequestBody CreateLinkJSONBody
+
+// UpdateLinkJSONRequestBody defines body for UpdateLink for application/json ContentType.
+type UpdateLinkJSONRequestBody UpdateLinkJSONBody
 
 // DeleteMeJSONRequestBody defines body for DeleteMe for application/json ContentType.
 type DeleteMeJSONRequestBody DeleteMeJSONBody

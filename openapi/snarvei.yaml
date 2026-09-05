@@ -404,11 +404,129 @@ paths:
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+  /api/links:
+    get:
+      operationId: listLinks
+      summary: Links in an organization the caller can see, newest first, paged.
+      tags: [links]
+      parameters:
+        - { name: organizationId, in: query, required: true, schema: { type: string } }
+        - { name: teamId, in: query, required: false, schema: { type: string } }
+        - { $ref: "#/components/parameters/Page" }
+        - { $ref: "#/components/parameters/PageSize" }
+      responses:
+        "200": { description: A page of links., content: { application/json: { schema: { $ref: "#/components/schemas/LinkPage" } } } }
+        "400": { $ref: "#/components/responses/ValidationFailed" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    post:
+      operationId: createLink
+      summary: Create a link in a team. Generated slug unless a custom one is given. Rate limited.
+      tags: [links]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [teamId, targetUrl]
+              properties:
+                teamId: { type: string }
+                targetUrl: { type: string, minLength: 1, maxLength: 2048 }
+                redirectStatus: { type: integer, enum: [301, 302, 307], default: 302 }
+                slug: { type: string, minLength: 3, maxLength: 64 }
+                title: { type: string, maxLength: 200 }
+                description: { type: string, maxLength: 2000 }
+      responses:
+        "201": { description: Created., content: { application/json: { schema: { $ref: "#/components/schemas/Link" } } } }
+        "400": { $ref: "#/components/responses/ValidationFailed" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { description: SLUG_TAKEN., content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /api/links/{linkId}:
+    get:
+      operationId: getLink
+      summary: One link.
+      tags: [links]
+      parameters: [{ $ref: "#/components/parameters/LinkId" }]
+      responses:
+        "200": { description: Link., content: { application/json: { schema: { $ref: "#/components/schemas/Link" } } } }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    patch:
+      operationId: updateLink
+      summary: Update target, status, activation, title or description. The slug never changes.
+      tags: [links]
+      parameters: [{ $ref: "#/components/parameters/LinkId" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                targetUrl: { type: string, minLength: 1, maxLength: 2048 }
+                redirectStatus: { type: integer, enum: [301, 302, 307] }
+                isActive: { type: boolean }
+                title: { type: string, maxLength: 200, nullable: true, description: "Send an empty string to clear; null is treated as omitted (keeps the current value)." }
+                description: { type: string, maxLength: 2000, nullable: true, description: "Send an empty string to clear; null is treated as omitted (keeps the current value)." }
+      responses:
+        "200": { description: Updated., content: { application/json: { schema: { $ref: "#/components/schemas/Link" } } } }
+        "400": { $ref: "#/components/responses/ValidationFailed" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      operationId: deleteLink
+      summary: Delete a link with its history and click events.
+      tags: [links]
+      parameters: [{ $ref: "#/components/parameters/LinkId" }]
+      responses:
+        "204": { description: Deleted. }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/links/{linkId}/history:
+    get:
+      operationId: listLinkHistory
+      summary: Target changes, newest first, paged.
+      tags: [links]
+      parameters:
+        - { $ref: "#/components/parameters/LinkId" }
+        - { $ref: "#/components/parameters/Page" }
+        - { $ref: "#/components/parameters/PageSize" }
+      responses:
+        "200": { description: History page., content: { application/json: { schema: { $ref: "#/components/schemas/HistoryPage" } } } }
+        "400": { $ref: "#/components/responses/ValidationFailed" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/links/{linkId}/analytics:
+    get:
+      operationId: getLinkAnalytics
+      summary: Click analytics over the last N days.
+      tags: [links]
+      parameters:
+        - { $ref: "#/components/parameters/LinkId" }
+        - { name: days, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 365, default: 30 } }
+      responses:
+        "200": { description: Analytics., content: { application/json: { schema: { $ref: "#/components/schemas/Analytics" } } } }
+        "400": { $ref: "#/components/responses/ValidationFailed" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
 components:
   parameters:
     OrgId: { name: orgId, in: path, required: true, schema: { type: string } }
     TeamId: { name: teamId, in: path, required: true, schema: { type: string } }
     InvitationId: { name: invitationId, in: path, required: true, schema: { type: string } }
+    LinkId: { name: linkId, in: path, required: true, schema: { type: string } }
+    Page: { name: page, in: query, required: false, schema: { type: integer, minimum: 1, default: 1 } }
+    PageSize: { name: pageSize, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 500, default: 100 } }
   responses:
     Unauthenticated: { description: UNAUTHENTICATED., content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
     Forbidden: { description: FORBIDDEN., content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
@@ -526,3 +644,66 @@ components:
         name: { type: string }
         email: { type: string }
         createdAt: { type: string, format: date-time }
+    Link:
+      type: object
+      required: [id, organizationId, teamId, teamName, slug, targetUrl, redirectStatus, isActive, title, description, createdBy, updatedBy, createdAt, updatedAt]
+      properties:
+        id: { type: string }
+        organizationId: { type: string }
+        teamId: { type: string }
+        teamName: { type: string }
+        slug: { type: string }
+        targetUrl: { type: string }
+        redirectStatus: { type: integer, enum: [301, 302, 307] }
+        isActive: { type: boolean }
+        title: { type: string, nullable: true }
+        description: { type: string, nullable: true }
+        createdBy: { type: string, nullable: true }
+        updatedBy: { type: string, nullable: true }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    LinkPage:
+      type: object
+      required: [items, page, pageSize, total]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/Link" } }
+        page: { type: integer }
+        pageSize: { type: integer }
+        total: { type: integer }
+    HistoryItem:
+      type: object
+      required: [id, linkId, oldTargetUrl, newTargetUrl, changedBy, changedAt]
+      properties:
+        id: { type: string }
+        linkId: { type: string }
+        oldTargetUrl: { type: string, nullable: true }
+        newTargetUrl: { type: string }
+        changedBy: { type: string, nullable: true }
+        changedAt: { type: string, format: date-time }
+    HistoryPage:
+      type: object
+      required: [items, page, pageSize, total]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/HistoryItem" } }
+        page: { type: integer }
+        pageSize: { type: integer }
+        total: { type: integer }
+    Analytics:
+      type: object
+      required: [totalClicks, uniqueVisitorApproximation, clicksByDay, topReferrers, topCountries, range]
+      properties:
+        totalClicks: { type: integer }
+        uniqueVisitorApproximation: { type: integer }
+        clicksByDay:
+          type: array
+          items: { type: object, required: [day, clicks], properties: { day: { type: string }, clicks: { type: integer } } }
+        topReferrers:
+          type: array
+          items: { type: object, required: [referer, clicks], properties: { referer: { type: string, nullable: true }, clicks: { type: integer } } }
+        topCountries:
+          type: array
+          items: { type: object, required: [country, clicks], properties: { country: { type: string, nullable: true }, clicks: { type: integer } } }
+        range:
+          type: object
+          required: [from, to]
+          properties: { from: { type: string, format: date-time }, to: { type: string, format: date-time } }

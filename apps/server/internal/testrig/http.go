@@ -16,6 +16,7 @@ import (
 	"github.com/refsdal/snarvei/server/internal/db/gen"
 	"github.com/refsdal/snarvei/server/internal/email"
 	"github.com/refsdal/snarvei/server/internal/ratelimit"
+	"github.com/refsdal/snarvei/server/internal/redirect"
 	"github.com/refsdal/snarvei/server/internal/storage"
 )
 
@@ -33,6 +34,7 @@ type AppRig struct {
 	Deps    api.Deps
 	Mail    *email.Recording
 	Store   *storage.Memory
+	Clicks  *redirect.Recorder
 	Handler http.Handler
 }
 
@@ -48,10 +50,11 @@ func App(t *testing.T) *AppRig {
 	}
 	q := gen.New(rig.Pool)
 	store := storage.NewMemory()
-	a := &AppRig{T: t, Rig: rig, Mail: mail, Store: store}
+	clicks := redirect.NewRecorder(q, nil)
+	a := &AppRig{T: t, Rig: rig, Mail: mail, Store: store, Clicks: clicks}
 	a.Deps = api.Deps{
 		Pool: rig.Pool, Q: q, Auth: svc, Storage: store, Email: mail, Mail: mail,
-		RateLimit: ratelimit.NewPostgres(q), Hasher: hasher,
+		RateLimit: ratelimit.NewPostgres(q), Hasher: hasher, Clicks: clicks,
 		AppURL: appURL, AppName: "Snarvei", OpenSignup: true, Version: "test", TestHooks: true,
 	}
 	a.Handler = api.NewHandler(a.Deps)

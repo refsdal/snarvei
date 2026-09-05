@@ -40,6 +40,9 @@ var operationTiers = map[string]tier{
 	"RegisterWithInvitation": tierPublicCapture,
 	"ListTeams":              tierOrg, "CreateTeam": tierOrgAdmin,
 	"ListTeamMembers": tierTeam, "AddTeamMember": tierTeamAdmin, "RemoveTeamMember": tierTeamAdmin,
+	"ListLinks": tierSession, "CreateLink": tierSessionRateLimited,
+	"GetLink": tierSession, "UpdateLink": tierSession, "DeleteLink": tierSession,
+	"ListLinkHistory": tierSession, "GetLinkAnalytics": tierSession,
 }
 
 const (

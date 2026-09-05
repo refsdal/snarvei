@@ -33,6 +33,7 @@ import (
 	dbgen "github.com/refsdal/snarvei/server/internal/db/gen"
 	"github.com/refsdal/snarvei/server/internal/email"
 	"github.com/refsdal/snarvei/server/internal/ratelimit"
+	"github.com/refsdal/snarvei/server/internal/redirect"
 	"github.com/refsdal/snarvei/server/internal/storage"
 	"github.com/refsdal/snarvei/server/internal/web"
 )
@@ -44,6 +45,7 @@ const (
 	shutdownTimeout   = 20 * time.Second
 	readHeaderTimeout = 15 * time.Second
 	idleTimeout       = 120 * time.Second
+	clickDrainTimeout = 5 * time.Second
 )
 
 func main() { os.Exit(run(os.Args[1:])) }
@@ -199,6 +201,11 @@ func serve(cfg *config.Config, migrate bool, sig <-chan os.Signal) int {
 		if err := srv.Shutdown(ctx); err != nil {
 			log.Printf("shutdown: %v", err)
 		}
+		// Drain runs exactly once, after Shutdown returns: the recorder's
+		// WaitGroup must not receive new Records once we start waiting on it.
+		if !deps.Clicks.Drain(clickDrainTimeout) {
+			slog.Warn("click recorder drain timed out", "event", "click.drain_timeout")
+		}
 		return 0
 	}
 }
@@ -249,7 +256,7 @@ func buildDeps(ctx context.Context, cfg *config.Config) (api.Deps, func(), error
 	}
 	return api.Deps{
 		Pool: pool, Q: q, Auth: authService, Storage: store, Email: sender, Mail: mailbox,
-		RateLimit: ratelimit.NewPostgres(q), Hasher: hasher, Log: slog.Default(),
+		RateLimit: ratelimit.NewPostgres(q), Hasher: hasher, Clicks: redirect.NewRecorder(q, slog.Default()), Log: slog.Default(),
 		AppURL: cfg.AppURL, AppName: cfg.AppName, OpenSignup: cfg.OpenSignup, Version: version,
 		TrustedProxyHops: cfg.TrustedProxyHops, TestHooks: cfg.E2ETestHooks,
 	}, closePool, nil
