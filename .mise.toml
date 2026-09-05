@@ -21,8 +21,8 @@ run = [
 ]
 
 [tasks.check]
-description = "Lint, typecheck"
-run = ["bun run check"]
+description = "Lint, typecheck, goreleaser config"
+run = ["bun run check", "goreleaser check"]
 
 [tasks.artifacts]
 description = "SPA + both server binaries -> dist/server/linux/<arch>/snarvei"
@@ -31,6 +31,13 @@ run = "bash scripts/build-artifacts.sh"
 [tasks.image]
 description = "Multi-arch image via buildx (runs artifacts first)"
 run = "bash scripts/build-image.sh"
+
+[tasks.snapshot]
+description = "Full GoReleaser dry run: archives, SBOMs, local image (no publish, no signing)"
+run = """
+trap 'bash scripts/restore-embed-overlay.sh' EXIT
+goreleaser release --snapshot --clean --skip=sign
+"""
 
 [tasks.e2e]
 description = "Playwright E2E against the real image (builds it if missing)"

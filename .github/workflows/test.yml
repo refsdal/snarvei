@@ -1,7 +1,7 @@
 name: Tests
 
-# The single definition of "the suite is green". Reusable: ci.yml (PRs) and,
-# from phase 5, release.yml (pushes to main) both call it.
+# The single definition of "the suite is green". Reusable: ci.yml (PRs) and
+# release.yml (pushes to main) both call it.
 on:
   workflow_call:
 
@@ -31,7 +31,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
         with:
-          install_args: "go bun go:github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen go:github.com/sqlc-dev/sqlc/cmd/sqlc"
+          install_args: "go bun aqua:goreleaser/goreleaser go:github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen go:github.com/sqlc-dev/sqlc/cmd/sqlc"
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
@@ -47,6 +47,10 @@ jobs:
           git diff --exit-code -- apps/frontend/src/lib/api-schema.d.ts || { echo "run 'bun run gen:client' and commit apps/frontend/src/lib/api-schema.d.ts"; exit 1; }
       - name: Lint + typecheck
         run: bun run check
+      # The release pipeline's config is code too — a broken .goreleaser.yaml
+      # must fail the PR, not the release.
+      - name: GoReleaser config
+        run: goreleaser check
       - name: Frontend tests
         run: bun run test
       - name: Go vet
