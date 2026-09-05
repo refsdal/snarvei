@@ -13,38 +13,29 @@ import {
   Stack,
   Typography,
 } from "@mui/material";
-import { useEffect, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useState } from "react";
 import { EditLinkDialog } from "../../components/dialogs";
-import { useWorkspace } from "../../hooks/use-workspace-context";
+import { useMessage } from "../../components/message-context";
+import { ApiError, errorMessage } from "../../lib/api";
+import { useDeleteLink, useLink, useUpdateLink } from "../../lib/data";
 import { buildLinksPath } from "../../lib/routes";
+import { linkDetailsRoute, orgRoute } from "../../router";
+import { NotFound } from "../../components/route-error";
 import { LinkAnalyticsCard, LinkHistoryCard } from "./components";
 
 export function LinkDetailsPage() {
-  const navigate = useNavigate();
-  const params = useParams();
-  const {
-    activeOrganization,
-    analytics,
-    appOrigin,
-    deleteLink,
-    getLinkById,
-    history,
-    loadingDetails,
-    loadingLinks,
-    setSelectedLinkId,
-    submitting,
-    updateLink,
-  } = useWorkspace();
+  const navigate = linkDetailsRoute.useNavigate();
+  const { linkId } = linkDetailsRoute.useParams();
+  const { organization } = orgRoute.useRouteContext();
+  const { setMessage } = useMessage();
+  const link = useLink(linkId);
+  const updateLink = useUpdateLink(organization.id);
+  const deleteLink = useDeleteLink(organization.id);
   const [editOpen, setEditOpen] = useState(false);
 
-  const link = params.linkId ? getLinkById(params.linkId) : null;
+  const appOrigin = window.location.origin;
 
-  useEffect(() => {
-    setSelectedLinkId(params.linkId ?? null);
-  }, [params.linkId, setSelectedLinkId]);
-
-  if (!link && loadingLinks) {
+  if (link.isPending) {
     return (
       <Box sx={{ minHeight: 240, display: "grid", placeItems: "center" }}>
         <CircularProgress />
@@ -52,14 +43,14 @@ export function LinkDetailsPage() {
     );
   }
 
-  if (!link) {
-    return (
-      <Alert severity="info">
-        The selected link is not available in the current organization. Go back to the links grid and choose another
-        row.
-      </Alert>
-    );
+  if (link.isError) {
+    if (link.error instanceof ApiError && link.error.status === 404) {
+      return <NotFound />;
+    }
+    return <Alert severity="error">{errorMessage(link.error, "Unable to load the selected link.")}</Alert>;
   }
+
+  const data = link.data;
 
   return (
     <Stack spacing={3}>
@@ -71,18 +62,18 @@ export function LinkDetailsPage() {
         <Box>
           <Button
             startIcon={<ArrowBackRoundedIcon />}
-            onClick={() => navigate(buildLinksPath(activeOrganization))}
+            onClick={() => navigate({ to: buildLinksPath(organization) })}
             sx={{ mb: 1, px: 0 }}
           >
             Back to links
           </Button>
           <Typography variant="h4" sx={{ fontWeight: 800 }}>
-            {link.title || link.slug}
+            {data.title || data.slug}
           </Typography>
-          <Typography color="text.secondary">{link.targetUrl}</Typography>
+          <Typography color="text.secondary">{data.targetUrl}</Typography>
         </Box>
         <Stack direction="row" spacing={1}>
-          <Button startIcon={<OpenInNewIcon />} href={`/l/${link.slug}`} target="_blank" rel="noreferrer">
+          <Button startIcon={<OpenInNewIcon />} href={`/l/${data.slug}`} target="_blank" rel="noreferrer">
             Open
           </Button>
           <Button variant="contained" onClick={() => setEditOpen(true)}>
@@ -102,10 +93,10 @@ export function LinkDetailsPage() {
               <Box sx={{ flex: 1 }}>
                 <Typography color="text.secondary">Full link</Typography>
                 <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
-                  <Typography sx={{ fontFamily: "monospace" }}>{`${appOrigin}/l/${link.slug}`}</Typography>
+                  <Typography sx={{ fontFamily: "monospace" }}>{`${appOrigin}/l/${data.slug}`}</Typography>
                   <IconButton
                     size="small"
-                    onClick={() => void navigator.clipboard.writeText(`${appOrigin}/l/${link.slug}`)}
+                    onClick={() => void navigator.clipboard.writeText(`${appOrigin}/l/${data.slug}`)}
                   >
                     <ContentCopyIcon fontSize="inherit" />
                   </IconButton>
@@ -113,20 +104,20 @@ export function LinkDetailsPage() {
               </Box>
               <Box sx={{ flex: 1 }}>
                 <Typography color="text.secondary">Destination</Typography>
-                <Typography>{link.targetUrl}</Typography>
+                <Typography>{data.targetUrl}</Typography>
               </Box>
             </Stack>
             <Stack direction={{ xs: "column", md: "row" }} spacing={2}>
               <Box sx={{ flex: 1 }}>
                 <Typography color="text.secondary">Status code</Typography>
-                <Typography>{link.redirectStatus}</Typography>
+                <Typography>{data.redirectStatus}</Typography>
               </Box>
               <Box sx={{ flex: 1 }}>
                 <Typography color="text.secondary">State</Typography>
                 <Chip
                   size="small"
-                  label={link.isActive ? "Active" : "Inactive"}
-                  color={link.isActive ? "success" : "default"}
+                  label={data.isActive ? "Active" : "Inactive"}
+                  color={data.isActive ? "success" : "default"}
                   sx={{ mt: 0.5 }}
                 />
               </Box>
@@ -136,22 +127,42 @@ export function LinkDetailsPage() {
       </Paper>
 
       <Stack direction={{ xs: "column", xl: "row" }} spacing={3}>
-        <LinkHistoryCard history={history} loading={loadingDetails} />
-        <LinkAnalyticsCard analytics={analytics} loading={loadingDetails} />
+        <LinkHistoryCard linkId={data.id} />
+        <LinkAnalyticsCard linkId={data.id} />
       </Stack>
 
       <EditLinkDialog
         open={editOpen}
-        link={link}
-        submitting={submitting}
+        link={data}
+        submitting={updateLink.isPending ? "update-link" : deleteLink.isPending ? "delete-link" : null}
         onClose={() => setEditOpen(false)}
-        onSubmit={async (values) => Boolean(await updateLink(link.id, values))}
-        onDelete={async () => {
-          const deleted = await deleteLink(link.id);
-          if (deleted) {
-            void navigate(buildLinksPath(activeOrganization));
+        onSubmit={async (values) => {
+          try {
+            await updateLink.mutateAsync({
+              linkId: data.id,
+              targetUrl: values.targetUrl,
+              title: values.title || "",
+              description: values.description || "",
+              redirectStatus: values.redirectStatus,
+              isActive: values.isActive,
+            });
+            setMessage({ severity: "success", text: "Link updated." });
+            return true;
+          } catch (err) {
+            setMessage({ severity: "error", text: errorMessage(err, "Unable to update the selected link.") });
+            return false;
           }
-          return deleted;
+        }}
+        onDelete={async () => {
+          try {
+            await deleteLink.mutateAsync(data.id);
+            setMessage({ severity: "success", text: "Link deleted." });
+            void navigate({ to: buildLinksPath(organization) });
+            return true;
+          } catch (err) {
+            setMessage({ severity: "error", text: errorMessage(err, "Unable to delete the selected link.") });
+            return false;
+          }
         }}
       />
     </Stack>

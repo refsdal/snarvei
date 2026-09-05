@@ -147,7 +147,7 @@ export function AppShell() {
                 if (typeof organizationId === "string" && organizationId) {
                   const nextOrganization = organizations.find((organization) => organization.id === organizationId);
                   void switchOrganization.mutateAsync(organizationId).then(() => {
-                    void navigate({ to: "/app/$org", params: orgParams(nextOrganization) });
+                    void navigate({ to: "/app/$org/dashboard", params: orgParams(nextOrganization) });
                   });
                 }
               }}

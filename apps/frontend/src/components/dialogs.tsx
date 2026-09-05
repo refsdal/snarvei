@@ -16,7 +16,8 @@ import {
   TextField,
 } from "@mui/material";
 import { useState } from "react";
-import type { InvitationRole, Link, SelectedLinkFormValues, Team } from "../types";
+import type { Link } from "../lib/data";
+import type { InvitationRole, SelectedLinkFormValues, Team } from "../types";
 
 export function CreateOrganizationDialog({
   open,

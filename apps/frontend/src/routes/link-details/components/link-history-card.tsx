@@ -1,17 +1,27 @@
 import { Alert, Card, CardContent, CircularProgress, Paper, Stack, Typography } from "@mui/material";
-import type { HistoryItem } from "../../../types";
+import { useLinkHistory } from "../../../lib/data";
 
-export function LinkHistoryCard(props: { history: HistoryItem[]; loading: boolean }) {
+export function LinkHistoryCard(props: { linkId: string }) {
+  const history = useLinkHistory(props.linkId);
+  const items = history.data?.items ?? [];
+
   return (
     <Card sx={{ flex: 1, border: "1px solid rgba(255,255,255,0.08)" }}>
       <CardContent>
-        <Typography variant="h6" sx={{ fontWeight: 700, mb: 2 }}>
-          History
-        </Typography>
-        {props.loading ? <CircularProgress size={20} /> : null}
+        <Stack direction="row" sx={{ justifyContent: "space-between", alignItems: "center", mb: 2 }}>
+          <Typography variant="h6" sx={{ fontWeight: 700 }}>
+            History
+          </Typography>
+          {history.data ? (
+            <Typography variant="body2" color="text.secondary">
+              {history.data.total} change{history.data.total === 1 ? "" : "s"}
+            </Typography>
+          ) : null}
+        </Stack>
+        {history.isPending ? <CircularProgress size={20} /> : null}
         <Stack spacing={1}>
-          {props.history.length ? (
-            props.history.map((item) => (
+          {items.length ? (
+            items.map((item) => (
               <Paper key={item.id} sx={{ p: 2, border: "1px solid rgba(255,255,255,0.06)" }}>
                 <Typography variant="body2" color="text.secondary">
                   {new Date(item.changedAt).toLocaleString()}
@@ -22,9 +32,9 @@ export function LinkHistoryCard(props: { history: HistoryItem[]; loading: boolea
                 </Typography>
               </Paper>
             ))
-          ) : (
+          ) : !history.isPending ? (
             <Alert severity="info">No target history for the selected link yet.</Alert>
-          )}
+          ) : null}
         </Stack>
       </CardContent>
     </Card>

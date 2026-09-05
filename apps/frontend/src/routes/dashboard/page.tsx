@@ -1,9 +1,10 @@
 import AddIcon from "@mui/icons-material/Add";
 import PersonAddAlt1Icon from "@mui/icons-material/PersonAddAlt1";
 import { Alert, Box, Button, Card, CardContent, CircularProgress, Paper, Stack, Typography } from "@mui/material";
-import { useNavigate } from "react-router-dom";
-import { useWorkspace } from "../../hooks/use-workspace-context";
+import { useNavigate } from "@tanstack/react-router";
+import { useInvitations, useLinks, useMembers, useTeams } from "../../lib/data";
 import { buildLinksPath, buildOrganizationPath } from "../../lib/routes";
+import { orgRoute } from "../../router";
 
 const StatCard = (props: { label: string; value: number; testId: string }) => (
   <Paper sx={{ flex: 1, p: 2.5, border: "1px solid rgba(255,255,255,0.08)" }}>
@@ -16,9 +17,15 @@ const StatCard = (props: { label: string; value: number; testId: string }) => (
 
 export function DashboardPage() {
   const navigate = useNavigate();
-  const { activeOrganization, invitations, links, loadingLinks, members, teams } = useWorkspace();
-  const recentLinks = links.slice(0, 5);
-  const pendingInvitations = invitations.filter((invitation) => invitation.status === "pending").length;
+  const { organization } = orgRoute.useRouteContext();
+  const links = useLinks(organization.id, { page: 1, pageSize: 100 });
+  const teams = useTeams(organization.id);
+  const members = useMembers(organization.id);
+  const invitations = useInvitations(organization.id);
+
+  const recentLinks = links.data?.items.slice(0, 5) ?? [];
+  const pendingInvitations = invitations.data?.filter((invitation) => invitation.status === "pending").length ?? 0;
+  const loadingLinks = links.isPending;
 
   return (
     <Stack spacing={3}>
@@ -31,25 +38,21 @@ export function DashboardPage() {
           <Typography variant="h4" sx={{ fontWeight: 800 }}>
             Overview
           </Typography>
-          <Typography color="text.secondary">
-            {activeOrganization
-              ? `What is happening in ${activeOrganization.name}.`
-              : "Choose an organization to get started."}
-          </Typography>
+          <Typography color="text.secondary">{`What is happening in ${organization.name}.`}</Typography>
         </Box>
         <Stack direction="row" spacing={1}>
           <Button
             variant="outlined"
             startIcon={<PersonAddAlt1Icon />}
-            onClick={() => navigate(buildOrganizationPath(activeOrganization, "organization"))}
+            onClick={() => navigate({ to: buildOrganizationPath(organization, "organization") })}
           >
             Invite member
           </Button>
           <Button
             variant="contained"
             startIcon={<AddIcon />}
-            disabled={!teams.length}
-            onClick={() => navigate(buildLinksPath(activeOrganization))}
+            disabled={!teams.data?.length}
+            onClick={() => navigate({ to: buildLinksPath(organization) })}
           >
             Create link
           </Button>
@@ -57,9 +60,9 @@ export function DashboardPage() {
       </Stack>
 
       <Stack direction={{ xs: "column", md: "row" }} spacing={2}>
-        <StatCard label="Short links" value={links.length} testId="dashboard-links-count" />
-        <StatCard label="Teams" value={teams.length} testId="dashboard-teams-count" />
-        <StatCard label="Members" value={members.length} testId="dashboard-members-count" />
+        <StatCard label="Short links" value={links.data?.total ?? 0} testId="dashboard-links-count" />
+        <StatCard label="Teams" value={teams.data?.length ?? 0} testId="dashboard-teams-count" />
+        <StatCard label="Members" value={members.data?.length ?? 0} testId="dashboard-members-count" />
         <StatCard label="Pending invitations" value={pendingInvitations} testId="dashboard-invitations-count" />
       </Stack>
 
@@ -69,14 +72,14 @@ export function DashboardPage() {
             <Typography variant="h6" sx={{ fontWeight: 700 }}>
               Recent links
             </Typography>
-            <Button size="small" onClick={() => navigate(buildLinksPath(activeOrganization))}>
+            <Button size="small" onClick={() => navigate({ to: buildLinksPath(organization) })}>
               View all
             </Button>
           </Stack>
           {loadingLinks ? <CircularProgress size={20} /> : null}
           {!loadingLinks && !recentLinks.length ? (
             <Alert severity="info">
-              {teams.length
+              {teams.data?.length
                 ? "No links yet. Create your first short link from the Links page."
                 : "Create a team first, then add links to it."}
             </Alert>
@@ -86,7 +89,7 @@ export function DashboardPage() {
               <Paper
                 key={link.id}
                 sx={{ p: 2, border: "1px solid rgba(255,255,255,0.06)", cursor: "pointer" }}
-                onClick={() => navigate(buildLinksPath(activeOrganization, link.id))}
+                onClick={() => navigate({ to: buildLinksPath(organization, link.id) })}
               >
                 <Stack direction={{ xs: "column", sm: "row" }} spacing={1} sx={{ justifyContent: "space-between" }}>
                   <Box sx={{ minWidth: 0 }}>

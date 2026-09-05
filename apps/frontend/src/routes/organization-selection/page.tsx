@@ -56,7 +56,7 @@ export function OrganizationSelectionPage() {
                     </Box>
                     <Button
                       variant={activeOrganizationId === organization.id ? "contained" : "outlined"}
-                      onClick={() => void navigate({ to: "/app/$org", params: orgParams(organization) })}
+                      onClick={() => void navigate({ to: "/app/$org/dashboard", params: orgParams(organization) })}
                     >
                       Open workspace
                     </Button>
@@ -84,7 +84,7 @@ export function OrganizationSelectionPage() {
         onSubmit={async (values) => {
           try {
             const created = await createOrganization.mutateAsync(values);
-            void navigate({ to: "/app/$org", params: orgParams(created) });
+            void navigate({ to: "/app/$org/dashboard", params: orgParams(created) });
             return true;
           } catch (err) {
             setMessage({ severity: "error", text: errorMessage(err, "Unable to create organization.") });

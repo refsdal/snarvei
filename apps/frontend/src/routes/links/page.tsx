@@ -2,17 +2,26 @@ import AddIcon from "@mui/icons-material/Add";
 import { Box, Button, Paper, Stack, Typography } from "@mui/material";
 import { DataGrid, type GridColDef, type GridRenderCellParams, type GridRowParams, Toolbar } from "@mui/x-data-grid";
 import { useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useMessage } from "../../components/message-context";
 import { CopyButton } from "../../components/copy-button";
 import { CreateLinkDialog } from "../../components/dialogs";
-import { useWorkspace } from "../../hooks/use-workspace-context";
+import { ApiError, errorMessage } from "../../lib/api";
+import { useCreateLink, useLinks, useTeams } from "../../lib/data";
 import { buildLinksPath } from "../../lib/routes";
+import { linksRoute, orgRoute } from "../../router";
 
 export function LinksPage() {
-  const navigate = useNavigate();
-  const { activeOrganization, appOrigin, createLink, links, loadingLinks, submitting, teams, activeTeamId } =
-    useWorkspace();
+  const navigate = linksRoute.useNavigate();
+  const { organization } = orgRoute.useRouteContext();
+  const { teamId, page = 1 } = linksRoute.useSearch();
+  const { setMessage } = useMessage();
+  const teams = useTeams(organization.id);
+  const links = useLinks(organization.id, { teamId, page, pageSize: 100 });
+  const createLink = useCreateLink(organization.id);
   const [createLinkOpen, setCreateLinkOpen] = useState(false);
+
+  const appOrigin = window.location.origin;
+  const activeTeamId = teamId ?? teams.data?.[0]?.id ?? null;
 
   const columns = useMemo<GridColDef[]>(
     () => [
@@ -54,7 +63,7 @@ export function LinksPage() {
   );
 
   const handleRowClick = (params: GridRowParams) => {
-    void navigate(buildLinksPath(activeOrganization, String(params.id)));
+    void navigate({ to: buildLinksPath(organization, String(params.id)) });
   };
 
   return (
@@ -68,17 +77,13 @@ export function LinksPage() {
           <Typography variant="h4" sx={{ fontWeight: 800 }}>
             Links
           </Typography>
-          <Typography color="text.secondary">
-            {activeOrganization
-              ? `Showing links you can access in ${activeOrganization.name}.`
-              : "Choose an organization to start managing links."}
-          </Typography>
+          <Typography color="text.secondary">{`Showing links you can access in ${organization.name}.`}</Typography>
         </Box>
         <Stack direction="row" spacing={1}>
           <Button
             variant="contained"
             startIcon={<AddIcon />}
-            disabled={!teams.length}
+            disabled={!teams.data?.length}
             onClick={() => setCreateLinkOpen(true)}
           >
             Create link
@@ -89,13 +94,19 @@ export function LinksPage() {
       <Paper sx={{ border: "1px solid rgba(255,255,255,0.08)", p: 1.5 }}>
         <Box sx={{ height: 640 }}>
           <DataGrid
-            rows={links}
+            rows={links.data?.items ?? []}
             columns={columns}
-            loading={loadingLinks}
+            loading={links.isPending}
             disableRowSelectionOnClick
             showToolbar
             slots={{ toolbar: Toolbar }}
             onRowClick={handleRowClick}
+            paginationMode="server"
+            rowCount={links.data?.total ?? 0}
+            paginationModel={{ page: page - 1, pageSize: 100 }}
+            onPaginationModelChange={(model) =>
+              navigate({ to: ".", search: (prev) => ({ ...prev, page: model.page + 1 }) })
+            }
             sx={{
               border: 0,
               "& .MuiDataGrid-cell": { cursor: "pointer" },
@@ -107,18 +118,32 @@ export function LinksPage() {
 
       <CreateLinkDialog
         open={createLinkOpen}
-        teams={teams}
-        activeTeamId={activeTeamId ?? teams[0]?.id ?? null}
+        teams={teams.data ?? []}
+        activeTeamId={activeTeamId}
         appOrigin={appOrigin}
-        submitting={submitting === "create-link"}
+        submitting={createLink.isPending}
         onClose={() => setCreateLinkOpen(false)}
         onSubmit={async (values) => {
-          const createdLink = await createLink(values);
-          if (createdLink) {
-            void navigate(buildLinksPath(activeOrganization, createdLink.id));
+          try {
+            const link = await createLink.mutateAsync({
+              teamId: values.teamId,
+              targetUrl: values.targetUrl,
+              redirectStatus: values.redirectStatus,
+              title: values.title,
+              description: values.description,
+              slug: values.slug || undefined,
+            });
+            setMessage({ severity: "success", text: "Short link created." });
+            void navigate({ to: buildLinksPath(organization, link.id) });
             return true;
+          } catch (err) {
+            if (err instanceof ApiError && err.code === "SLUG_TAKEN") {
+              setMessage({ severity: "error", text: err.message });
+              return false;
+            }
+            setMessage({ severity: "error", text: errorMessage(err, "Unable to create link.") });
+            return false;
           }
-          return false;
         }}
       />
     </Stack>

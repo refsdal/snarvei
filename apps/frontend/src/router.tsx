@@ -117,14 +117,48 @@ export const orgRoute = createRoute({
   pendingComponent: PageFallback,
 });
 
-// Children of orgRoute are added by Tasks 4 and 5:
-//   /$org/dashboard, /$org/links, /$org/links/$linkId, /$org/organization
+// /$org: land on the dashboard by default.
+export const orgIndexRoute = createRoute({
+  getParentRoute: () => orgRoute,
+  path: "/",
+  beforeLoad: ({ params }) => {
+    throw redirect({ to: "/app/$org/dashboard", params: { org: params.org }, replace: true });
+  },
+});
+
+export const dashboardRoute = createRoute({
+  getParentRoute: () => orgRoute,
+  path: "/dashboard",
+  component: lazyRouteComponent(() => import("./routes/dashboard/page"), "DashboardPage"),
+});
+
+export const linksRoute = createRoute({
+  getParentRoute: () => orgRoute,
+  path: "/links",
+  validateSearch: (s: Record<string, unknown>): { teamId?: string; page?: number } => ({
+    teamId: str(s.teamId),
+    page: typeof s.page === "number" && s.page >= 1 ? s.page : undefined,
+  }),
+  component: lazyRouteComponent(() => import("./routes/links/page"), "LinksPage"),
+});
+
+export const linkDetailsRoute = createRoute({
+  getParentRoute: () => orgRoute,
+  path: "/links/$linkId",
+  component: lazyRouteComponent(() => import("./routes/link-details/page"), "LinkDetailsPage"),
+});
+
+// Children of orgRoute added by Task 5: /$org/organization
 
 const routeTree = rootRoute.addChildren([
   indexRoute,
   resetPasswordRoute,
   invitationRoute,
-  appRoute.addChildren([appIndexRoute, settingsRoute, orgRoute.addChildren([])]),
+  appRoute.addChildren([
+    appIndexRoute,
+    settingsRoute,
+    orgRoute.addChildren([orgIndexRoute, dashboardRoute, linksRoute, linkDetailsRoute]),
+  ]),
 ]);
 
 export const router = createRouter({
