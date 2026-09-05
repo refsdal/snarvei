@@ -138,6 +138,15 @@ func serveMode(migrate bool) int {
 	signal.Notify(sig, syscall.SIGTERM, syscall.SIGINT)
 	defer signal.Stop(sig)
 
+	return serve(cfg, migrate, sig)
+}
+
+// serve runs the migrate-then-serve (or server-only) lifecycle for an
+// already-loaded config: optionally migrate, open the pool, listen, and
+// block until either the listener fails or sig delivers a shutdown signal.
+// Split out of serveMode so tests can drive it against a testrig database
+// and a real signal without touching the process environment or os.Args.
+func serve(cfg *config.Config, migrate bool, sig <-chan os.Signal) int {
 	if migrate {
 		if err := db.ApplyMigrations(context.Background(), cfg.DatabaseURL, cfg.MigrationLockKey); err != nil {
 			log.Printf("migration failed: %v", err)

@@ -1,7 +1,16 @@
 {
   "$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
   "files": {
-    "includes": ["apps/**", "scripts/**", "e2e/**", "*.ts", "!apps/server", "!apps/frontend/src/lib/api-schema.d.ts"]
+    "includes": [
+      "apps/**",
+      "scripts/**",
+      "e2e/**",
+      "*.ts",
+      "!apps/server",
+      "!apps/frontend/src/lib/api-schema.d.ts",
+      "!e2e/test-results",
+      "!e2e/playwright-report"
+    ]
   },
   "formatter": {
     "enabled": true,

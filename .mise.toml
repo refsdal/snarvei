@@ -31,3 +31,11 @@ run = "bash scripts/build-artifacts.sh"
 [tasks.image]
 description = "Multi-arch image via buildx (runs artifacts first)"
 run = "bash scripts/build-image.sh"
+
+[tasks.e2e]
+description = "Playwright E2E against the real image (builds it if missing)"
+run = """
+trap 'bash scripts/e2e-stack.sh down' EXIT
+bash scripts/e2e-stack.sh up
+bun run test:e2e
+"""

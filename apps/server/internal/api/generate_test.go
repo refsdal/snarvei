@@ -11,6 +11,9 @@ import (
 // Regenerates into a temp dir and diffs against the committed files.
 func TestGeneratedCodeIsUpToDate(t *testing.T) {
 	if _, err := exec.LookPath("oapi-codegen"); err != nil {
+		if os.Getenv("CI") != "" {
+			t.Fatal("oapi-codegen missing in CI")
+		}
 		t.Skip("oapi-codegen not on PATH (run `mise install`)")
 	}
 	tmp := t.TempDir()
