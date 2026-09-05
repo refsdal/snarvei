@@ -24,9 +24,17 @@ import (
 	// The distroless image has no zoneinfo; compile it in.
 	_ "time/tzdata"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+
 	"github.com/refsdal/snarvei/server/internal/api"
+	"github.com/refsdal/snarvei/server/internal/auth"
+	"github.com/refsdal/snarvei/server/internal/clientip"
 	"github.com/refsdal/snarvei/server/internal/config"
 	"github.com/refsdal/snarvei/server/internal/db"
+	dbgen "github.com/refsdal/snarvei/server/internal/db/gen"
+	"github.com/refsdal/snarvei/server/internal/email"
+	"github.com/refsdal/snarvei/server/internal/ratelimit"
+	"github.com/refsdal/snarvei/server/internal/storage"
 	"github.com/refsdal/snarvei/server/internal/web"
 )
 
@@ -161,7 +169,11 @@ func serve(cfg *config.Config, migrate bool, sig <-chan os.Signal) int {
 	}
 	defer pool.Close()
 
-	deps := api.Deps{Pool: pool, AppName: cfg.AppName, OpenSignup: cfg.OpenSignup, Version: version}
+	deps, err := newDeps(pool, cfg)
+	if err != nil {
+		log.Printf("startup failed: %v", err)
+		return 1
+	}
 
 	srv := &http.Server{
 		Addr:              fmt.Sprintf(":%d", cfg.Port),
@@ -207,4 +219,66 @@ func signalName(s os.Signal) string {
 	default:
 		return s.String()
 	}
+}
+
+// newDeps builds the api.Deps for a real process from cfg and an open pool.
+// This is a minimal, provisional wiring: Task 11 (composition root) replaces
+// it with buildDeps, JSON slog logging and the E2E test-hooks endpoint.
+func newDeps(pool *pgxpool.Pool, cfg *config.Config) (api.Deps, error) {
+	hasher := clientip.NewHasher(cfg.IPHashPepper, cfg.AuthSecret)
+	q := dbgen.New(pool)
+
+	var sender email.Sender
+	if cfg.SMTPHost != "" {
+		sender = email.NewSMTP(email.SMTPConfig{
+			Host: cfg.SMTPHost, Port: cfg.SMTPPort,
+			Username: cfg.SMTPUsername, Password: cfg.SMTPPassword,
+			From: cfg.EmailFrom,
+		})
+	} else {
+		sender = email.NewNoop(nil)
+	}
+
+	svc, err := auth.New(auth.Config{
+		AppURL:     cfg.AppURL,
+		AppName:    cfg.AppName,
+		Secret:     cfg.AuthSecret,
+		OpenSignup: cfg.OpenSignup,
+		Pool:       pool,
+		ClientIP:   hasher.Extractor(cfg.TrustedProxyHops),
+		Email:      sender,
+	})
+	if err != nil {
+		return api.Deps{}, fmt.Errorf("auth: %w", err)
+	}
+
+	var store storage.Storage
+	if cfg.StorageDriver == "s3" {
+		store = storage.NewS3(storage.S3Config{
+			Bucket: cfg.S3Bucket, Endpoint: cfg.S3Endpoint,
+			AccessKeyID: cfg.S3AccessKeyID, SecretAccessKey: cfg.S3SecretAccessKey,
+			Region: cfg.S3Region,
+		})
+	} else {
+		store, err = storage.NewFS(cfg.StorageFSPath)
+		if err != nil {
+			return api.Deps{}, fmt.Errorf("storage: %w", err)
+		}
+	}
+
+	return api.Deps{
+		Pool:             pool,
+		Q:                q,
+		Auth:             svc,
+		Storage:          store,
+		Email:            sender,
+		RateLimit:        ratelimit.NewPostgres(q),
+		Hasher:           hasher,
+		AppURL:           cfg.AppURL,
+		AppName:          cfg.AppName,
+		OpenSignup:       cfg.OpenSignup,
+		Version:          version,
+		TrustedProxyHops: cfg.TrustedProxyHops,
+		TestHooks:        cfg.E2ETestHooks,
+	}, nil
 }

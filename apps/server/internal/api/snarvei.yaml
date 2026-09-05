@@ -74,7 +74,347 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/PublicConfig"
+  /api/me:
+    get:
+      operationId: getMe
+      summary: The signed-in user and a minimal view of the current session (never the token).
+      tags: [me]
+      responses:
+        "200": { description: Me., content: { application/json: { schema: { $ref: "#/components/schemas/Me" } } } }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+    patch:
+      operationId: updateMe
+      summary: Update the display name.
+      tags: [me]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string, minLength: 1, maxLength: 120 }
+      responses:
+        "200": { description: Updated., content: { application/json: { schema: { $ref: "#/components/schemas/Me" } } } }
+        "400": { $ref: "#/components/responses/ValidationFailed" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+    delete:
+      operationId: deleteMe
+      summary: Delete the account. Refused with LAST_OWNER when the user is the sole owner of an organization.
+      tags: [me]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [password]
+              properties:
+                password: { type: string, minLength: 1 }
+      responses:
+        "204": { description: Deleted; every session is revoked. }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "409": { description: LAST_OWNER., content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+  /api/me/email:
+    post:
+      operationId: requestEmailChange
+      summary: Send a confirmation link to a new address. Rate limited.
+      tags: [me]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [newEmail, password]
+              properties:
+                newEmail: { type: string, format: email }
+                password: { type: string, minLength: 1 }
+      responses:
+        "202": { description: Confirmation mail sent (or dropped when mail is off). }
+        "400": { $ref: "#/components/responses/ValidationFailed" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "409": { description: EMAIL_TAKEN., content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /api/me/email/confirm:
+    post:
+      operationId: confirmEmailChange
+      summary: Apply the address change carried by the token (single use, one hour).
+      tags: [me]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token]
+              properties:
+                token: { type: string, minLength: 1 }
+      responses:
+        "200": { description: Changed., content: { application/json: { schema: { $ref: "#/components/schemas/Me" } } } }
+        "400": { $ref: "#/components/responses/ValidationFailed" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "409": { description: EMAIL_TAKEN., content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+  /api/me/sessions:
+    get:
+      operationId: listMySessions
+      summary: Active sessions of the signed-in user, newest first. Never the token.
+      tags: [me]
+      responses:
+        "200": { description: Sessions., content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/SessionSummary" } } } } }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+    delete:
+      operationId: revokeOtherSessions
+      summary: Revoke every session except the current one.
+      tags: [me]
+      responses:
+        "204": { description: Revoked. }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+  /api/me/sessions/{sessionId}:
+    delete:
+      operationId: revokeMySession
+      summary: Revoke one of the user's own sessions.
+      tags: [me]
+      parameters: [{ name: sessionId, in: path, required: true, schema: { type: string } }]
+      responses:
+        "204": { description: Revoked. }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/organizations:
+    get:
+      operationId: listOrganizations
+      summary: Organizations the caller belongs to, with their role.
+      tags: [organizations]
+      responses:
+        "200": { description: Organizations., content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/Organization" } } } } }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+    post:
+      operationId: createOrganization
+      summary: Create an organization; the caller becomes its owner.
+      tags: [organizations]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, slug]
+              properties:
+                name: { type: string, minLength: 1, maxLength: 120 }
+                slug: { type: string, pattern: "^[a-z0-9]+(?:-[a-z0-9]+)*$", minLength: 2, maxLength: 64 }
+      responses:
+        "201": { description: Created., content: { application/json: { schema: { $ref: "#/components/schemas/Organization" } } } }
+        "400": { $ref: "#/components/responses/ValidationFailed" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "409": { description: SLUG_TAKEN., content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+  /api/organizations/{orgId}/switch:
+    post:
+      operationId: switchOrganization
+      summary: Make this organization the session's active one.
+      tags: [organizations]
+      parameters: [{ $ref: "#/components/parameters/OrgId" }]
+      responses:
+        "204": { description: Switched. }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /api/organizations/{orgId}/members:
+    get:
+      operationId: listOrganizationMembers
+      summary: Members with their roles.
+      tags: [organizations]
+      parameters: [{ $ref: "#/components/parameters/OrgId" }]
+      responses:
+        "200": { description: Members., content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/Member" } } } } }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /api/organizations/{orgId}/invitations:
+    get:
+      operationId: listInvitations
+      summary: Pending invitations (owner/admin).
+      tags: [invitations]
+      parameters: [{ $ref: "#/components/parameters/OrgId" }]
+      responses:
+        "200": { description: Invitations., content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/Invitation" } } } } }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    post:
+      operationId: createInvitation
+      summary: Invite an email address, optionally straight into a team (owner/admin).
+      tags: [invitations]
+      parameters: [{ $ref: "#/components/parameters/OrgId" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, role]
+              properties:
+                email: { type: string, format: email }
+                role: { type: string, enum: [admin, member] }
+                teamId: { type: string }
+      responses:
+        "201": { description: Created; the invitee is emailed a link., content: { application/json: { schema: { $ref: "#/components/schemas/Invitation" } } } }
+        "400": { $ref: "#/components/responses/ValidationFailed" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { description: ALREADY_MEMBER or INVITATION_EXISTS., content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+  /api/organizations/{orgId}/invitations/{invitationId}:
+    delete:
+      operationId: cancelInvitation
+      summary: Cancel a pending invitation (owner/admin).
+      tags: [invitations]
+      parameters:
+        - { $ref: "#/components/parameters/OrgId" }
+        - { name: invitationId, in: path, required: true, schema: { type: string } }
+      responses:
+        "204": { description: Cancelled. }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/invitations/{invitationId}:
+    get:
+      operationId: getInvitation
+      summary: Public view of an invitation for the accept page. Never the email.
+      tags: [invitations]
+      parameters: [{ $ref: "#/components/parameters/InvitationId" }]
+      responses:
+        "200": { description: Invitation., content: { application/json: { schema: { $ref: "#/components/schemas/PublicInvitation" } } } }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/invitations/{invitationId}/accept:
+    post:
+      operationId: acceptInvitation
+      summary: Accept; the session's email must match. Adds the team membership when the invitation carries one.
+      tags: [invitations]
+      parameters: [{ $ref: "#/components/parameters/InvitationId" }]
+      responses:
+        "200": { description: Joined., content: { application/json: { schema: { $ref: "#/components/schemas/Organization" } } } }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { description: INVITATION_EMAIL_MISMATCH., content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "410": { description: INVITATION_INVALID., content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+  /api/invitations/{invitationId}/reject:
+    post:
+      operationId: rejectInvitation
+      summary: Reject; the session's email must match.
+      tags: [invitations]
+      parameters: [{ $ref: "#/components/parameters/InvitationId" }]
+      responses:
+        "204": { description: Rejected. }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { description: INVITATION_EMAIL_MISMATCH., content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "410": { description: INVITATION_INVALID., content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+  /api/invitations/{invitationId}/register:
+    post:
+      operationId: registerWithInvitation
+      summary: Create the account for an invitee whose email has no account, accept, and start a session. Rate limited.
+      tags: [invitations]
+      parameters: [{ $ref: "#/components/parameters/InvitationId" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, password]
+              properties:
+                name: { type: string, minLength: 1, maxLength: 120 }
+                password: { type: string, minLength: 8 }
+      responses:
+        "201": { description: Registered and signed in (session cookie set)., content: { application/json: { schema: { $ref: "#/components/schemas/Me" } } } }
+        "400": { $ref: "#/components/responses/ValidationFailed" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { description: EMAIL_TAKEN (sign in and accept instead)., content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "410": { description: INVITATION_INVALID., content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /api/organizations/{orgId}/teams:
+    get:
+      operationId: listTeams
+      summary: Teams the caller can see (all for owner/admin, own teams for members).
+      tags: [teams]
+      parameters: [{ $ref: "#/components/parameters/OrgId" }]
+      responses:
+        "200": { description: Teams., content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/Team" } } } } }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    post:
+      operationId: createTeam
+      summary: Create a team (owner/admin).
+      tags: [teams]
+      parameters: [{ $ref: "#/components/parameters/OrgId" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string, minLength: 1, maxLength: 120 }
+      responses:
+        "201": { description: Created., content: { application/json: { schema: { $ref: "#/components/schemas/Team" } } } }
+        "400": { $ref: "#/components/responses/ValidationFailed" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { description: TEAM_EXISTS., content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+  /api/teams/{teamId}/members:
+    get:
+      operationId: listTeamMembers
+      summary: Members of a team.
+      tags: [teams]
+      parameters: [{ $ref: "#/components/parameters/TeamId" }]
+      responses:
+        "200": { description: Members., content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/TeamMember" } } } } }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    post:
+      operationId: addTeamMember
+      summary: Add an organization member to the team (owner/admin).
+      tags: [teams]
+      parameters: [{ $ref: "#/components/parameters/TeamId" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [userId]
+              properties:
+                userId: { type: string }
+      responses:
+        "204": { description: Added (idempotent). }
+        "400": { $ref: "#/components/responses/ValidationFailed" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { description: Team or user not found in the organization., content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+  /api/teams/{teamId}/members/{userId}:
+    delete:
+      operationId: removeTeamMember
+      summary: Remove a member from the team (owner/admin).
+      tags: [teams]
+      parameters:
+        - { $ref: "#/components/parameters/TeamId" }
+        - { name: userId, in: path, required: true, schema: { type: string } }
+      responses:
+        "204": { description: Removed. }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
 components:
+  parameters:
+    OrgId: { name: orgId, in: path, required: true, schema: { type: string } }
+    TeamId: { name: teamId, in: path, required: true, schema: { type: string } }
+    InvitationId: { name: invitationId, in: path, required: true, schema: { type: string } }
+  responses:
+    Unauthenticated: { description: UNAUTHENTICATED., content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+    Forbidden: { description: FORBIDDEN., content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+    NotFound: { description: NOT_FOUND., content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+    ValidationFailed: { description: VALIDATION_FAILED., content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+    RateLimited: { description: RATE_LIMITED., content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
   schemas:
     PublicConfig:
       type: object
@@ -95,3 +435,94 @@ components:
         details:
           type: object
           additionalProperties: true
+    User:
+      type: object
+      required: [id, name, email, image, twoFactorEnabled]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        email: { type: string }
+        image: { type: string, nullable: true }
+        twoFactorEnabled: { type: boolean }
+    SessionInfo:
+      type: object
+      required: [id, expiresAt, activeOrganizationId]
+      properties:
+        id: { type: string }
+        expiresAt: { type: string, format: date-time }
+        activeOrganizationId: { type: string, nullable: true }
+    Me:
+      type: object
+      required: [user, session]
+      properties:
+        user: { $ref: "#/components/schemas/User" }
+        session: { $ref: "#/components/schemas/SessionInfo" }
+    SessionSummary:
+      type: object
+      required: [id, createdAt, lastAccess, expiresAt, userAgent, current]
+      properties:
+        id: { type: string }
+        createdAt: { type: string, format: date-time }
+        lastAccess: { type: string, format: date-time, nullable: true }
+        expiresAt: { type: string, format: date-time }
+        userAgent: { type: string, nullable: true }
+        current: { type: boolean }
+    Organization:
+      type: object
+      required: [id, name, slug, role]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        slug: { type: string }
+        role: { type: string, enum: [owner, admin, member] }
+    Member:
+      type: object
+      required: [id, userId, name, email, role, createdAt]
+      properties:
+        id: { type: string }
+        userId: { type: string }
+        name: { type: string }
+        email: { type: string }
+        role: { type: string }
+        createdAt: { type: string, format: date-time }
+    Invitation:
+      type: object
+      required: [id, email, role, status, expiresAt, teamId, teamName, createdAt]
+      properties:
+        id: { type: string }
+        email: { type: string }
+        role: { type: string }
+        status: { type: string }
+        expiresAt: { type: string, format: date-time, nullable: true }
+        teamId: { type: string, nullable: true }
+        teamName: { type: string, nullable: true }
+        createdAt: { type: string, format: date-time }
+    PublicInvitation:
+      type: object
+      required: [id, organizationName, inviterName, role, status, teamName, expiresAt, hasAccount]
+      properties:
+        id: { type: string }
+        organizationName: { type: string }
+        inviterName: { type: string, nullable: true }
+        role: { type: string }
+        status: { type: string }
+        teamName: { type: string, nullable: true }
+        expiresAt: { type: string, format: date-time, nullable: true }
+        hasAccount: { type: boolean }
+    Team:
+      type: object
+      required: [id, organizationId, name, memberCount, createdAt]
+      properties:
+        id: { type: string }
+        organizationId: { type: string }
+        name: { type: string }
+        memberCount: { type: integer }
+        createdAt: { type: string, format: date-time }
+    TeamMember:
+      type: object
+      required: [userId, name, email, createdAt]
+      properties:
+        userId: { type: string }
+        name: { type: string }
+        email: { type: string }
+        createdAt: { type: string, format: date-time }
