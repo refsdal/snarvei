@@ -7,8 +7,10 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/refsdal/snarvei/server/internal/api/gen"
+	"github.com/refsdal/snarvei/server/internal/api/middleware"
 	"github.com/refsdal/snarvei/server/internal/auth"
 	"github.com/refsdal/snarvei/server/internal/db"
+	"github.com/refsdal/snarvei/server/internal/links"
 )
 
 // httpError is what handlers return to the strict-server machinery for
@@ -56,6 +58,12 @@ func classify(err error) error {
 		return fail(http.StatusBadRequest, "VALIDATION_FAILED", "Unknown role")
 	case errors.Is(err, auth.ErrNotFound), errors.Is(err, auth.ErrSessionNotFound), errors.Is(err, pgx.ErrNoRows):
 		return fail(http.StatusNotFound, "NOT_FOUND", "Not found")
+	case errors.Is(err, links.ErrInvalidSlug), errors.Is(err, links.ErrInvalidTargetURL):
+		return fail(http.StatusBadRequest, "VALIDATION_FAILED", err.Error())
+	case errors.Is(err, middleware.ErrTeamNotFound):
+		return fail(http.StatusNotFound, "NOT_FOUND", "Team not found")
+	case errors.Is(err, middleware.ErrTeamForbidden):
+		return fail(http.StatusForbidden, "FORBIDDEN", "Team access denied")
 	case db.IsUniqueViolation(err):
 		return fail(http.StatusConflict, "CONFLICT", "Already exists")
 	}
