@@ -1,12 +1,13 @@
 import KeyOutlinedIcon from "@mui/icons-material/KeyOutlined";
 import { Button, Stack, TextField } from "@mui/material";
-import { useNavigate } from "@tanstack/react-router";
+import { getRouteApi, useNavigate } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { errorMessage } from "../../../lib/api";
 import { useConfirmEmailChange, useRequestEmailChange } from "../../../lib/data";
-import { settingsRoute } from "../../../router";
 import { SectionCard } from "./section-card";
 import type { SharedSectionProps } from "./types";
+
+const route = getRouteApi("/app/settings");
 
 export function EmailSection(
   props: SharedSectionProps & {
@@ -15,7 +16,7 @@ export function EmailSection(
   },
 ) {
   const navigate = useNavigate();
-  const { emailToken } = settingsRoute.useSearch();
+  const { emailToken } = route.useSearch();
   const [password, setPassword] = useState("");
   const requestEmailChange = useRequestEmailChange();
   const confirmEmailChange = useConfirmEmailChange();

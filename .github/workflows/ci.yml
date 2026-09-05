@@ -19,6 +19,7 @@ jobs:
     permissions:
       contents: read
 
+  # Merging the PR then releases automatically — see release.yml.
   image:
     needs: test
     runs-on: ubuntu-latest
@@ -54,8 +55,6 @@ jobs:
 
       - name: Build artifacts (SPA + both server binaries)
         run: VERSION=${{ steps.version.outputs.version }}-pr.${{ github.event.pull_request.number }} bash scripts/build-artifacts.sh
-
-      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
 
       - name: Can this run push?
         id: gate

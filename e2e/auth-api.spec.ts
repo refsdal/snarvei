@@ -1,29 +1,9 @@
-import { expect, test, type APIRequestContext } from "@playwright/test";
-
-const unique = () => Math.random().toString(36).slice(2, 10);
-const PASSWORD = "Playwright123";
-const ORIGIN = process.env.E2E_BASE_URL ?? "http://127.0.0.1:3300";
-const headers = { origin: ORIGIN, "content-type": "application/json" };
-
-// Limen's credential-password plugin throttles /signup/credential to 5
-// requests per 10s per client IP; every request in this file shares the
-// e2e stack's loopback IP, so retry through the throttle instead of assuming
-// a fixed number of prior sign-ups.
-async function signUp(request: APIRequestContext, name: string, email: string) {
-  let res = await request.post("/api/auth/signup/credential", { headers, data: { name, email, password: PASSWORD } });
-  for (let attempt = 0; res.status() === 429 && attempt < 8; attempt++) {
-    const retryAfter = Number(res.headers()["retry-after"]);
-    await new Promise((resolve) =>
-      setTimeout(resolve, (Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter : 2.5) * 1000),
-    );
-    res = await request.post("/api/auth/signup/credential", { headers, data: { name, email, password: PASSWORD } });
-  }
-  expect(res.status(), await res.text()).toBe(200);
-}
+import { expect, test } from "@playwright/test";
+import { headers, lastMailTo, ORIGIN, PASSWORD, signUpApi, unique } from "./support";
 
 test("sign up, sign in, profile", async ({ request }) => {
   const email = `kari-${unique()}@example.com`;
-  await signUp(request, "Kari", email);
+  await signUpApi(request, "Kari", email);
   const me = await request.get("/api/me");
   expect(me.status()).toBe(200);
   const body = await me.json();
@@ -45,7 +25,7 @@ test("organization, team, invitation with team, registration through the invitat
   playwright,
 }) => {
   const owner = `owner-${unique()}@example.com`;
-  await signUp(request, "Owner", owner);
+  await signUpApi(request, "Owner", owner);
   const org = await request.post("/api/organizations", { headers, data: { name: "Acme", slug: `acme-${unique()}` } });
   expect(org.status(), await org.text()).toBe(201);
   const orgId = (await org.json()).id;
@@ -55,7 +35,6 @@ test("organization, team, invitation with team, registration through the invitat
   expect(team.status()).toBe(201);
   const teamId = (await team.json()).id;
 
-  await request.delete("/api/_test/mail");
   const invitee = `new-${unique()}@example.com`;
   const inv = await request.post(`/api/organizations/${orgId}/invitations`, {
     headers,
@@ -64,9 +43,9 @@ test("organization, team, invitation with team, registration through the invitat
   expect(inv.status(), await inv.text()).toBe(201);
   const invitationId = (await inv.json()).id;
 
-  const mail = await (await request.get("/api/_test/mail")).json();
-  expect(mail.messages[0].to).toBe(invitee);
-  expect(mail.messages[0].text).toContain(`/app/invitations/${invitationId}`);
+  const mail = await lastMailTo(request, invitee);
+  expect(mail.to).toBe(invitee);
+  expect(mail.text).toContain(`/app/invitations/${invitationId}`);
 
   // A second, anonymous context plays the invitee.
   const guest = await playwright.request.newContext({ baseURL: ORIGIN });
@@ -110,7 +89,7 @@ test("organization, team, invitation with team, registration through the invitat
 
 test("existing account accepts an invitation; strangers are refused", async ({ request, playwright }) => {
   const owner = `owner-${unique()}@example.com`;
-  await signUp(request, "Owner", owner);
+  await signUpApi(request, "Owner", owner);
   const orgId = (
     await (
       await request.post("/api/organizations", { headers, data: { name: "Beta", slug: `beta-${unique()}` } })
@@ -120,9 +99,9 @@ test("existing account accepts an invitation; strangers are refused", async ({ r
 
   const existing = `existing-${unique()}@example.com`;
   const invitee = await playwright.request.newContext({ baseURL: ORIGIN });
-  await signUp(invitee, "Existing", existing);
+  await signUpApi(invitee, "Existing", existing);
   const stranger = await playwright.request.newContext({ baseURL: ORIGIN });
-  await signUp(stranger, "Stranger", `stranger-${unique()}@example.com`);
+  await signUpApi(stranger, "Stranger", `stranger-${unique()}@example.com`);
 
   const inv = await request.post(`/api/organizations/${orgId}/invitations`, {
     headers,
@@ -144,12 +123,11 @@ test("existing account accepts an invitation; strangers are refused", async ({ r
 
 test("password reset flow through the mailbox", async ({ request, playwright }) => {
   const email = `reset-${unique()}@example.com`;
-  await signUp(request, "Reset Me", email);
-  await request.delete("/api/_test/mail");
+  await signUpApi(request, "Reset Me", email);
   const anon = await playwright.request.newContext({ baseURL: ORIGIN });
   expect((await anon.post("/api/auth/passwords/request-reset", { headers, data: { email } })).status()).toBe(200);
-  const mail = await (await anon.get("/api/_test/mail")).json();
-  const token = /token=([A-Za-z0-9._-]+)/.exec(mail.messages[0].text)?.[1];
+  const mail = await lastMailTo(anon, email);
+  const token = /token=([A-Za-z0-9._-]+)/.exec(mail.text)?.[1];
   expect(token).toBeTruthy();
   expect(
     (await anon.post("/api/auth/passwords/reset", { headers, data: { token, new_password: "Changed456" } })).status(),

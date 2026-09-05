@@ -1,9 +1,10 @@
 import { Alert, Box, Button, Card, CardContent, Stack, TextField, Typography } from "@mui/material";
-import { useNavigate } from "@tanstack/react-router";
+import { getRouteApi, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { errorMessage } from "../../lib/api";
 import { password } from "../../lib/auth-client";
-import { resetPasswordRoute } from "../../router";
+
+const route = getRouteApi("/reset-password");
 
 export const MIN_PASSWORD_LENGTH = 8;
 
@@ -13,7 +14,7 @@ export const MIN_PASSWORD_LENGTH = 8;
  */
 export function ResetPasswordPage() {
   const navigate = useNavigate();
-  const { token, error: linkError } = resetPasswordRoute.useSearch();
+  const { token, error: linkError } = route.useSearch();
   const [newPassword, setNewPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [error, setError] = useState<string | null>(null);

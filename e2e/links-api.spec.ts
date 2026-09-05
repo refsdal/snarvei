@@ -1,37 +1,5 @@
-import { expect, test, type APIRequestContext } from "@playwright/test";
-
-const unique = () => Math.random().toString(36).slice(2, 10);
-const PASSWORD = "Playwright123";
-const ORIGIN = process.env.E2E_BASE_URL ?? "http://127.0.0.1:3300";
-const headers = { origin: ORIGIN, "content-type": "application/json" };
-
-// Limen's credential-password plugin throttles /signup/credential to 5
-// requests per 10s per client IP; every request in this file shares the
-// e2e stack's loopback IP, so retry through the throttle instead of assuming
-// a fixed number of prior sign-ups.
-async function signUp(request: APIRequestContext, name: string, email: string) {
-  let res = await request.post("/api/auth/signup/credential", { headers, data: { name, email, password: PASSWORD } });
-  for (let attempt = 0; res.status() === 429 && attempt < 8; attempt++) {
-    const retryAfter = Number(res.headers()["retry-after"]);
-    await new Promise((resolve) =>
-      setTimeout(resolve, (Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter : 2.5) * 1000),
-    );
-    res = await request.post("/api/auth/signup/credential", { headers, data: { name, email, password: PASSWORD } });
-  }
-  expect(res.status(), await res.text()).toBe(200);
-}
-
-async function workspace(request: APIRequestContext) {
-  await signUp(request, "Owner", `owner-${unique()}@example.com`);
-  const org = await (
-    await request.post("/api/organizations", { headers, data: { name: "Acme", slug: `acme-${unique()}` } })
-  ).json();
-  await request.post(`/api/organizations/${org.id}/switch`, { headers });
-  const team = await (
-    await request.post(`/api/organizations/${org.id}/teams`, { headers, data: { name: "Marketing" } })
-  ).json();
-  return { orgId: org.id as string, teamId: team.id as string };
-}
+import { expect, test } from "@playwright/test";
+import { headers, ORIGIN, PASSWORD, unique, workspace } from "./support";
 
 test("create a link, follow it, retarget it, see history and analytics, deactivate, delete", async ({
   request,
@@ -128,7 +96,6 @@ test("a member outside the team cannot see or edit its links", async ({ request,
   const link = await (
     await request.post("/api/links", { headers, data: { teamId, targetUrl: "https://example.com" } })
   ).json();
-  await request.delete("/api/_test/mail");
   const email = `member-${unique()}@example.com`;
   const inv = await (
     await request.post(`/api/organizations/${orgId}/invitations`, { headers, data: { email, role: "member" } })

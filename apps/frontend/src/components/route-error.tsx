@@ -1,8 +1,18 @@
 import { Alert, Box, Button, Stack, Typography } from "@mui/material";
 
-function ErrorLayout({ title, detail, showReload }: { title: string; detail: string | null; showReload: boolean }) {
+function ErrorLayout({
+  title,
+  detail,
+  showReload,
+  fullScreen = true,
+}: {
+  title: string;
+  detail: string | null;
+  showReload: boolean;
+  fullScreen?: boolean;
+}) {
   return (
-    <Box sx={{ minHeight: "100vh", display: "grid", placeItems: "center", p: 3 }}>
+    <Box sx={{ minHeight: fullScreen ? "100vh" : 240, display: "grid", placeItems: "center", p: 3 }}>
       <Stack spacing={2} sx={{ maxWidth: 520 }}>
         <Typography variant="h4" sx={{ fontWeight: 800 }}>
           {title}
@@ -29,11 +39,11 @@ function ErrorLayout({ title, detail, showReload }: { title: string; detail: str
 }
 
 /** Route error boundary: a render/loader error no longer blanks the whole app. */
-export function RouteError({ error }: { error: unknown }) {
+export function RouteError({ error, fullScreen = true }: { error: unknown; fullScreen?: boolean }) {
   const detail = error instanceof Error ? error.message : null;
-  return <ErrorLayout title="Something went wrong" detail={detail} showReload />;
+  return <ErrorLayout title="Something went wrong" detail={detail} showReload fullScreen={fullScreen} />;
 }
 
-export function NotFound() {
-  return <ErrorLayout title="Page not found" detail={null} showReload={false} />;
+export function NotFound({ fullScreen = true }: { fullScreen?: boolean } = {}) {
+  return <ErrorLayout title="Page not found" detail={null} showReload={false} fullScreen={fullScreen} />;
 }

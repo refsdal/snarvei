@@ -3,6 +3,7 @@ import GroupIcon from "@mui/icons-material/Group";
 import PersonAddAlt1Icon from "@mui/icons-material/PersonAddAlt1";
 import { Alert, Box, Button, Card, CardContent, Chip, CircularProgress, Paper, Stack, Typography } from "@mui/material";
 import { DataGrid, type GridColDef, Toolbar } from "@mui/x-data-grid";
+import { getRouteApi } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { CreateTeamDialog, InviteMemberDialog } from "../../components/dialogs";
 import { useMessage } from "../../components/message-context";
@@ -17,10 +18,11 @@ import {
   useTeams,
 } from "../../lib/data";
 import type { Invitation, Member, Team } from "../../lib/data";
-import { orgRoute } from "../../router";
+
+const route = getRouteApi("/app/$org");
 
 export function OrganizationPage() {
-  const { organization } = orgRoute.useRouteContext();
+  const { organization } = route.useRouteContext();
   const { setMessage } = useMessage();
   const members = useMembers(organization.id);
   const teams = useTeams(organization.id);

@@ -1,10 +1,11 @@
 import AddIcon from "@mui/icons-material/Add";
 import PersonAddAlt1Icon from "@mui/icons-material/PersonAddAlt1";
 import { Alert, Box, Button, Card, CardContent, CircularProgress, Paper, Stack, Typography } from "@mui/material";
-import { useNavigate } from "@tanstack/react-router";
+import { getRouteApi, useNavigate } from "@tanstack/react-router";
 import { useInvitations, useLinks, useMembers, useTeams } from "../../lib/data";
 import { orgParams } from "../../lib/routes";
-import { orgRoute } from "../../router";
+
+const route = getRouteApi("/app/$org");
 
 const StatCard = (props: { label: string; value: number; testId: string }) => (
   <Paper sx={{ flex: 1, p: 2.5, border: "1px solid rgba(255,255,255,0.08)" }}>
@@ -17,7 +18,7 @@ const StatCard = (props: { label: string; value: number; testId: string }) => (
 
 export function DashboardPage() {
   const navigate = useNavigate();
-  const { organization } = orgRoute.useRouteContext();
+  const { organization } = route.useRouteContext();
   const links = useLinks(organization.id, { page: 1, pageSize: 100 });
   const teams = useTeams(organization.id);
   const members = useMembers(organization.id);

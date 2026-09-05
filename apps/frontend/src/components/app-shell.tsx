@@ -21,7 +21,7 @@ import {
 import { Link, Outlet, useLocation, useNavigate, useParams } from "@tanstack/react-router";
 import { signOut } from "../lib/auth-client";
 import type { Organization } from "../lib/data";
-import { useMe, useOrganizations, useSwitchOrganization } from "../lib/data";
+import { useMe, useOrganizations } from "../lib/data";
 import { getOrganizationPathSegment, orgParams, settingsPath } from "../lib/routes";
 import { useMessage } from "./message-context";
 
@@ -42,7 +42,6 @@ export function AppShell() {
   const { data: me } = useMe();
   const { data: organizations = [] } = useOrganizations();
   const { message, setMessage } = useMessage();
-  const switchOrganization = useSwitchOrganization();
   const activeOrganizationId = me?.session.activeOrganizationId ?? null;
   const activeOrganization = organizations.find((organization) => organization.id === activeOrganizationId) ?? null;
   const currentOrgSegment = org ?? getOrganizationPathSegment(activeOrganization);
@@ -146,9 +145,7 @@ export function AppShell() {
                 const organizationId = event.target.value;
                 if (typeof organizationId === "string" && organizationId) {
                   const nextOrganization = organizations.find((organization) => organization.id === organizationId);
-                  void switchOrganization.mutateAsync(organizationId).then(() => {
-                    void navigate({ to: "/app/$org/dashboard", params: orgParams(nextOrganization) });
-                  });
+                  void navigate({ to: "/app/$org/dashboard", params: orgParams(nextOrganization) });
                 }
               }}
             >
