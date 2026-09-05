@@ -18,7 +18,14 @@ import {
 import { useState } from "react";
 import type { Link, Team } from "../lib/data";
 import type { InvitationRole } from "../lib/roles";
-import type { SelectedLinkFormValues } from "../types";
+
+export type SelectedLinkFormValues = {
+  targetUrl: string;
+  title: string;
+  description: string;
+  redirectStatus: 301 | 302 | 307;
+  isActive: boolean;
+};
 
 export function CreateOrganizationDialog({
   open,

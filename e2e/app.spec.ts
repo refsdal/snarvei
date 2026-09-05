@@ -1,0 +1,140 @@
+import { expect, test, type Page } from "@playwright/test";
+
+const unique = () => Math.random().toString(36).slice(2, 10);
+const PASSWORD = "Playwright123";
+
+// Limen throttles sign-up 5/10s per IP; every browser in this file shares the
+// e2e stack's loopback IP, so retry through the 429 instead of assuming a
+// fixed number of prior sign-ups. The "Create account" button stays disabled
+// until name, email and password are all filled, so fill first, then retry
+// the click.
+async function signUp(page: Page, name: string, email: string) {
+  await page.goto("/");
+  await page.getByTestId("auth-name-input").fill(name);
+  await page.getByTestId("auth-email-input").fill(email);
+  await page.getByTestId("auth-password-input").fill(PASSWORD);
+  for (let attempt = 0; attempt < 8; attempt++) {
+    await page.getByTestId("create-account-button").click();
+    const outcome = await Promise.race([
+      page.waitForURL(/\/app(\?|$|\/)/, { timeout: 5000 }).then(() => "ok" as const),
+      page
+        .getByText(/too many|rate/i)
+        .first()
+        .waitFor({ timeout: 5000 })
+        .then(() => "throttled" as const),
+    ]).catch(() => "unknown" as const);
+    if (outcome === "ok") return;
+    await page.waitForTimeout(2500);
+  }
+  throw new Error("sign-up kept being throttled");
+}
+
+async function createOrganization(page: Page, name: string, slug: string) {
+  await page.getByRole("button", { name: "Create organization" }).click();
+  await page.getByTestId("organization-name-input").fill(name);
+  await page.getByTestId("organization-slug-input").fill(slug);
+  await page.getByTestId("create-organization-button").click();
+  await page.waitForURL(`**/app/${slug}/dashboard`);
+}
+
+test("sign up, create an organization and a team, create a link, follow it, see the click", async ({
+  page,
+  context,
+}) => {
+  const slug = `acme-${unique()}`;
+  await signUp(page, "Kari", `kari-${unique()}@example.com`);
+  await createOrganization(page, "Acme", slug);
+  await expect(page.getByTestId("dashboard-links-count")).toHaveText("0");
+
+  await page.goto(`/app/${slug}/organization`);
+  await page.getByTestId("open-create-team-button").click();
+  await page.getByTestId("team-name-input").fill("Marketing");
+  await page.getByTestId("create-team-button").click();
+  await expect(page.getByTestId("manage-team-Marketing")).toBeVisible();
+
+  await page.goto(`/app/${slug}/links`);
+  await page
+    .getByRole("button", { name: /create link/i })
+    .first()
+    .click();
+  await page.getByTestId("create-link-target-input").fill("https://example.com/launch");
+  await page.getByTestId("create-link-title-input").fill("Launch");
+  await page.getByTestId("create-link-button").click();
+  await page.waitForURL(/\/links\/[^/]+$/);
+  const shortUrl = await page
+    .getByText(/\/l\/[A-Za-z2-9]{8}/)
+    .first()
+    .textContent();
+  const shortPath = shortUrl?.match(/\/l\/[A-Za-z2-9]{8}/)?.[0];
+  expect(shortPath).toBeTruthy();
+
+  const visitor = await context.newPage();
+  const hop = await visitor.request.get(shortPath!, { maxRedirects: 0 });
+  expect(hop.status()).toBe(302);
+  expect(hop.headers().location).toBe("https://example.com/launch");
+  await visitor.close();
+
+  await page.reload();
+  await expect(page.getByTestId("analytics-total-clicks")).toHaveText("1", { timeout: 10_000 });
+
+  await page.getByRole("button", { name: /edit/i }).first().click();
+  await page.getByTestId("selected-link-target-input").fill("https://example.com/v2");
+  await page.getByTestId("save-link-button").click();
+  await expect(page.getByText("https://example.com/v2").first()).toBeVisible();
+});
+
+test("wrong password shows an error; sign out returns to the landing page", async ({ page }) => {
+  const email = `ola-${unique()}@example.com`;
+  await signUp(page, "Ola", email);
+  await page.getByRole("button", { name: "Sign out" }).click();
+  await page.waitForURL("/");
+  await page.getByTestId("auth-email-input").fill(email);
+  await page.getByTestId("auth-password-input").fill("wrong-password");
+  await page.getByTestId("sign-in-button").click();
+  await expect(page.getByRole("alert")).toBeVisible();
+  await expect(page).toHaveURL("/");
+});
+
+test("an invitee registers through the emailed link and lands in the organization", async ({
+  page,
+  browser,
+  request,
+}) => {
+  const slug = `acme-${unique()}`;
+  await signUp(page, "Owner", `owner-${unique()}@example.com`);
+  await createOrganization(page, "Acme", slug);
+  await page.goto(`/app/${slug}/organization`);
+
+  // The mailbox is a single global recording on the e2e server shared by every
+  // spec file; other files' tests reset and send mail concurrently (see
+  // auth-api.spec.ts), which can either shadow this invitee's message with a
+  // later index-0 one or, rarely, reset it away entirely between our send and
+  // our read. Match by recipient (never index 0) and retry the invite with a
+  // fresh recipient the rare time a concurrent reset wins the race.
+  let message: { to: string; text: string } | undefined;
+  let invitee = "";
+  for (let attempt = 0; !message && attempt < 3; attempt++) {
+    invitee = `new-${unique()}@example.com`;
+    await page.getByTestId("open-invite-member-button").click();
+    await page.getByTestId("invite-email-input").fill(invitee);
+    await page.getByTestId("send-invitation-button").click();
+    await expect(page.getByTestId(`invitation-${invitee}`)).toBeVisible();
+    const mail = await (await request.get("/api/_test/mail")).json();
+    message = (mail.messages as { to: string; text: string }[]).find((m) => m.to === invitee);
+  }
+  expect(message).toBeTruthy();
+  const link = message?.text.match(/\/app\/invitations\/[A-Za-z0-9-]+/)?.[0];
+  expect(link).toBeTruthy();
+
+  const guest = await browser.newContext();
+  const gp = await guest.newPage();
+  await gp.goto(link!);
+  await expect(gp.getByTestId("invitation-organization")).toHaveText("Acme");
+  await gp.getByTestId("auth-name-input").fill("New Person");
+  await gp.getByTestId("auth-password-input").fill(PASSWORD);
+  await gp.getByTestId("create-account-button").click();
+  await gp.waitForURL(/\/app(\?|$|\/)/);
+  await gp.getByRole("button", { name: "Open workspace" }).click();
+  await gp.waitForURL(`**/app/${slug}/dashboard`);
+  await guest.close();
+});

@@ -7,7 +7,9 @@
 > (auth, organizations, teams, invitations, profile, email, storage) is
 > implemented; see the OpenAPI spec for the live routes. Phase 3 (links, the
 > /l/{slug} redirect with click analytics, /openapi.json and /scalar) is
-> implemented.
+> implemented. Phase 4 (frontend on TanStack Router/Query, generated client,
+> limen-auth; passkeys removed) is implemented; `bun run gen:client`
+> regenerates `apps/frontend/src/lib/api-schema.d.ts` after spec changes.
 
 # AGENTS.md
 

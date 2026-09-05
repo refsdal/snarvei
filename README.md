@@ -208,6 +208,25 @@ Operations (deploy/verify, rollback, recovery, secrets, common failures): see [`
 
 `AGENTS.md` holds the locked product/architecture decisions; preserve them unless the product direction changes explicitly. The production-readiness review and its follow-ups are tracked in GitHub issue #38.
 
+### Frontend/Go dev loop (Phase 4+)
+
+Run the frontend (`apps/frontend`, Vite on `:5173`) against a locally built Go server (`apps/server`) instead of the container image:
+
+```bash
+docker compose -f docker-compose.test.yml up -d --wait   # Postgres on 127.0.0.1:55432, db snarvei_test
+
+DATABASE_URL="postgres://snarvei:snarvei@localhost:55432/snarvei_test?sslmode=disable" \
+APP_URL=http://localhost:5173 \
+AUTH_SECRET="$(openssl rand -base64 32)" \
+OPEN_SIGNUP=1 \
+STORAGE_DRIVER=fs STORAGE_FS_PATH=/tmp/snarvei-dev \
+bun run dev:server                                        # go run ./cmd/snarvei, :3000
+
+bun run dev                                                # Vite, :5173, proxies /api /l /healthz /readyz /openapi.json /scalar /images /robots.txt to :3000
+```
+
+`APP_URL` must be exactly `http://localhost:5173` (not `127.0.0.1`) because Limen rejects non-GET auth requests whose `Origin` header does not match it. `bun run gen:client` regenerates `apps/frontend/src/lib/api-schema.d.ts` from `openapi/snarvei.yaml`; the generated file is committed and CI fails on drift.
+
 ## Repository Conventions
 
 1. Use `pnpm`.

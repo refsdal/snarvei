@@ -1,6 +1,4 @@
-import type { OrganizationSummary } from "../types";
-
-type OrganizationTarget = Pick<OrganizationSummary, "id" | "slug"> | null | undefined;
+type OrganizationTarget = { id: string; slug?: string | null } | null | undefined;
 
 export const getOrganizationPathSegment = (organization: OrganizationTarget) =>
   organization?.slug ?? organization?.id ?? "";
