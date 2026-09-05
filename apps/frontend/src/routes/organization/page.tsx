@@ -17,7 +17,6 @@ import {
   useTeams,
 } from "../../lib/data";
 import type { Invitation, Member, Team } from "../../lib/data";
-import { roleLabel } from "../../lib/roles";
 import { orgRoute } from "../../router";
 
 export function OrganizationPage() {
@@ -41,7 +40,7 @@ export function OrganizationPage() {
     () => [
       { field: "name", headerName: "Name", flex: 1, minWidth: 200 },
       { field: "email", headerName: "Email", flex: 1.1, minWidth: 240 },
-      { field: "role", headerName: "Role", width: 180, valueGetter: (value) => roleLabel(value) },
+      { field: "role", headerName: "Role", width: 180 },
     ],
     [],
   );
@@ -155,7 +154,7 @@ export function OrganizationPage() {
                       <Box>
                         <Typography sx={{ fontWeight: 700 }}>{invitation.email}</Typography>
                         <Typography variant="body2" color="text.secondary">
-                          {roleLabel(invitation.role)} · {invitation.status}
+                          {invitation.role} · {invitation.status}
                           {invitation.teamName ? ` · team ${invitation.teamName}` : ""}
                         </Typography>
                       </Box>
@@ -197,12 +196,7 @@ export function OrganizationPage() {
           }
         }}
       />
-      <TeamMembersDialog
-        team={managedTeam}
-        organizationId={organization.id}
-        members={members.data ?? []}
-        onClose={() => setManagedTeam(null)}
-      />
+      <TeamMembersDialog team={managedTeam} members={members.data ?? []} onClose={() => setManagedTeam(null)} />
       <CreateTeamDialog
         open={createTeamOpen}
         submitting={createTeam.isPending}

@@ -34,9 +34,6 @@ export function TeamMembersDialog({
   onClose,
 }: {
   team: Team | null;
-  // Kept in the prop shape for callers (the API already scopes team
-  // mutations by teamId, so the dialog itself has no use for it).
-  organizationId: string;
   members: Member[];
   onClose: () => void;
 }) {

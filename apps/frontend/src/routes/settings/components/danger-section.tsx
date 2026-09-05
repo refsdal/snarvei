@@ -23,9 +23,20 @@ export function DangerSection(props: SharedSectionProps) {
 
   const deleteAccount = () =>
     void props.runAction("delete-account", async () => {
-      await deleteMe.mutateAsync({ password });
-      setConfirmOpen(false);
-      void navigate({ to: "/" });
+      try {
+        await deleteMe.mutateAsync({ password });
+        // `useDeleteMe`'s onSuccess already cleared the cache, which unmounts
+        // this dialog (SettingsPage falls back to a spinner once `me` is
+        // gone) — don't touch this component's own state after that.
+        void navigate({ to: "/", replace: true });
+      } catch (err) {
+        // A failure (e.g. LAST_OWNER) leaves the page mounted: close the
+        // dialog so the error alert — rendered in AppShell, outside this
+        // MUI Modal — isn't hidden by the modal's aria-hidden on the rest
+        // of the page. `runAction` still shows the message.
+        setConfirmOpen(false);
+        throw err;
+      }
     });
 
   return (

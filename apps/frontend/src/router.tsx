@@ -101,11 +101,15 @@ export const settingsRoute = createRoute({
 export const orgRoute = createRoute({
   getParentRoute: () => appRoute,
   path: "/$org",
-  beforeLoad: async ({ context, params }) => {
+  beforeLoad: async ({ context, params, preload }) => {
     const organizations = await context.queryClient.ensureQueryData(organizationsQueryOptions());
     const organization = organizations.find((o) => o.slug === params.org || o.id === params.org);
     if (!organization) throw redirect({ to: "/app", replace: true });
-    if (context.me.session.activeOrganizationId !== organization.id) {
+    // `defaultPreload: "intent"` runs `beforeLoad` on hover too. Only switch
+    // the server-side active organization (and invalidate `me`) for a real
+    // navigation — a hover preload must not POST /switch, or hovering a
+    // stale nav link mid-switch would silently flip the org back.
+    if (!preload && context.me.session.activeOrganizationId !== organization.id) {
       await unwrap<void>(
         client.POST("/api/organizations/{orgId}/switch", { params: { path: { orgId: organization.id } } }),
       );

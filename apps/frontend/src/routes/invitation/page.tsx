@@ -12,7 +12,6 @@ import {
   useRegisterWithInvitation,
   useRejectInvitation,
 } from "../../lib/data";
-import { roleLabel } from "../../lib/roles";
 import { invitationRoute } from "../../router";
 
 // `createLink` (not `component={Link}`) is what keeps `search` typed against
@@ -125,7 +124,7 @@ export function InvitationPage() {
                 <Typography>
                   You have been invited to join{" "}
                   <strong data-testid="invitation-organization">{invitation.data.organizationName}</strong> as{" "}
-                  <strong>{roleLabel(invitation.data.role)}</strong>
+                  <strong>{invitation.data.role}</strong>
                   {invitation.data.inviterName ? ` by ${invitation.data.inviterName}` : ""}
                   {invitation.data.teamName ? `, joining the ${invitation.data.teamName} team` : ""}.
                 </Typography>
@@ -163,7 +162,7 @@ export function InvitationPage() {
                 <Typography>
                   You have been invited to join{" "}
                   <strong data-testid="invitation-organization">{invitation.data.organizationName}</strong> as{" "}
-                  <strong>{roleLabel(invitation.data.role)}</strong>. Create an account to accept.
+                  <strong>{invitation.data.role}</strong>. Create an account to accept.
                 </Typography>
                 {emailTaken ? (
                   <Alert severity="warning" action={signInLink}>

@@ -138,3 +138,47 @@ test("an invitee registers through the emailed link and lands in the organizatio
   await gp.waitForURL(`**/app/${slug}/dashboard`);
   await guest.close();
 });
+
+test("account deletion: a sole owner is blocked; a user with no organization deletes and lands on the landing page", async ({
+  page,
+}) => {
+  // (a) A sole owner of an organization must transfer ownership first — the
+  // server refuses with LAST_OWNER, and the account must not be deleted.
+  const ownerEmail = `owner-${unique()}@example.com`;
+  await signUp(page, "Solo Owner", ownerEmail);
+  await createOrganization(page, "Acme", `acme-${unique()}`);
+  await page.goto("/app/settings");
+  await page.getByTestId("settings-delete-password-input").fill(PASSWORD);
+  await page.getByTestId("settings-delete-account-button").click();
+  await page.getByTestId("settings-delete-account-confirm-button").click();
+  await expect(page.getByRole("alert").filter({ hasText: /owner/i })).toBeVisible();
+  // Still signed in: no redirect away from settings, and the page still works.
+  await expect(page).toHaveURL(/\/app\/settings$/);
+  await expect(page.getByTestId("settings-delete-account-button")).toBeVisible();
+
+  // Sign out before the second scenario: `signUp` navigates to "/", and a
+  // still-authenticated owner would bounce straight back into the app. The
+  // settings page itself also has a "Sign out from this device" button, so
+  // match the drawer's exactly.
+  await page.getByRole("button", { name: "Sign out", exact: true }).click();
+  await page.waitForURL("/");
+
+  // (b) A fresh user with no organization can delete straight away and lands
+  // cleanly on the landing page (this used to crash into the root error
+  // boundary — see final-review.md Important 1).
+  const freshEmail = `fresh-${unique()}@example.com`;
+  await signUp(page, "Fresh User", freshEmail);
+  await page.goto("/app/settings");
+  await page.getByTestId("settings-delete-password-input").fill(PASSWORD);
+  await page.getByTestId("settings-delete-account-button").click();
+  await page.getByTestId("settings-delete-account-confirm-button").click();
+  await page.waitForURL("/");
+  await expect(page.getByTestId("sign-in-button")).toBeVisible();
+
+  // The deleted credentials no longer work.
+  await page.getByTestId("auth-email-input").fill(freshEmail);
+  await page.getByTestId("auth-password-input").fill(PASSWORD);
+  await page.getByTestId("sign-in-button").click();
+  await expect(page.getByRole("alert")).toBeVisible();
+  await expect(page).toHaveURL("/");
+});

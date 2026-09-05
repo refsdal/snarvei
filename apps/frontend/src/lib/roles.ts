@@ -2,5 +2,3 @@
 // invite UI — only member/admin can be invited (see the createInvitation
 // request body in lib/api-schema.d.ts).
 export type InvitationRole = "member" | "admin";
-
-export const roleLabel = (role: string): string => role;

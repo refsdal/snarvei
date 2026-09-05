@@ -4,11 +4,14 @@ import { keys } from "../src/lib/data/keys";
 describe("query keys", () => {
   test("match the spec's shapes", () => {
     expect(keys.me).toEqual(["me"]);
+    expect(keys.config).toEqual(["config"]);
     expect(keys.organizations).toEqual(["organizations"]);
     expect(keys.sessions).toEqual(["sessions"]);
     expect(keys.teams("o1")).toEqual(["teams", "o1"]);
+    expect(keys.teamMembers("t1")).toEqual(["teamMembers", "t1"]);
     expect(keys.members("o1")).toEqual(["members", "o1"]);
     expect(keys.invitations("o1")).toEqual(["invitations", "o1"]);
+    expect(keys.invitation("i1")).toEqual(["invitation", "i1"]);
     expect(keys.links("o1", { page: 2, pageSize: 100, teamId: "t1" })).toEqual([
       "links",
       "o1",

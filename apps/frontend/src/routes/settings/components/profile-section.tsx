@@ -56,7 +56,7 @@ export function ProfileSection(
             ref={fileInputRef}
             hidden
             type="file"
-            accept="image/png,image/jpeg,image/webp,image/gif"
+            accept="image/png,image/jpeg,image/webp"
             onChange={(event) => {
               const file = event.target.files?.[0];
               event.target.value = "";

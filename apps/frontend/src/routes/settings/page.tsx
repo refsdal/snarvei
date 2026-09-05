@@ -1,5 +1,6 @@
 import { Button, Divider, Stack, Typography } from "@mui/material";
 import { useNavigate } from "@tanstack/react-router";
+import { PageFallback } from "../../components/page-fallback";
 import { useMessage } from "../../components/message-context";
 import { signOut } from "../../lib/auth-client";
 import { useMe } from "../../lib/data";
@@ -16,9 +17,16 @@ import {
 export function SettingsPage() {
   const navigate = useNavigate();
   const { setMessage } = useMessage();
-  // The route requires a session before this component ever renders.
-  const me = useMe().data!;
-  const settingsState = useSettingsState({ me, setMessage });
+  // The route guards on a session at entry, but account deletion clears the
+  // whole cache (see useDeleteMe) while this page is still mounted, so `me`
+  // can go nullish mid-render. Call every hook unconditionally, then fall
+  // back to a spinner instead of asserting non-null.
+  const { data: me } = useMe();
+  const settingsState = useSettingsState({ me: me ?? null, setMessage });
+
+  if (!me) {
+    return <PageFallback fullScreen />;
+  }
 
   const sharedProps = { me, busyAction: settingsState.busyAction, setMessage, runAction: settingsState.runAction };
 
