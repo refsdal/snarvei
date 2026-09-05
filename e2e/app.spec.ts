@@ -1,49 +1,13 @@
-import { expect, test, type Page } from "@playwright/test";
-
-const unique = () => Math.random().toString(36).slice(2, 10);
-const PASSWORD = "Playwright123";
-
-// Limen throttles sign-up 5/10s per IP; every browser in this file shares the
-// e2e stack's loopback IP, so retry through the 429 instead of assuming a
-// fixed number of prior sign-ups. The "Create account" button stays disabled
-// until name, email and password are all filled, so fill first, then retry
-// the click.
-async function signUp(page: Page, name: string, email: string) {
-  await page.goto("/");
-  await page.getByTestId("auth-name-input").fill(name);
-  await page.getByTestId("auth-email-input").fill(email);
-  await page.getByTestId("auth-password-input").fill(PASSWORD);
-  for (let attempt = 0; attempt < 8; attempt++) {
-    await page.getByTestId("create-account-button").click();
-    const outcome = await Promise.race([
-      page.waitForURL(/\/app(\?|$|\/)/, { timeout: 5000 }).then(() => "ok" as const),
-      page
-        .getByText(/too many|rate/i)
-        .first()
-        .waitFor({ timeout: 5000 })
-        .then(() => "throttled" as const),
-    ]).catch(() => "unknown" as const);
-    if (outcome === "ok") return;
-    await page.waitForTimeout(2500);
-  }
-  throw new Error("sign-up kept being throttled");
-}
-
-async function createOrganization(page: Page, name: string, slug: string) {
-  await page.getByRole("button", { name: "Create organization" }).click();
-  await page.getByTestId("organization-name-input").fill(name);
-  await page.getByTestId("organization-slug-input").fill(slug);
-  await page.getByTestId("create-organization-button").click();
-  await page.waitForURL(`**/app/${slug}/dashboard`);
-}
+import { expect, test } from "@playwright/test";
+import { createOrganizationUi, lastMailTo, PASSWORD, signUpUi, unique } from "./support";
 
 test("sign up, create an organization and a team, create a link, follow it, see the click", async ({
   page,
   context,
 }) => {
   const slug = `acme-${unique()}`;
-  await signUp(page, "Kari", `kari-${unique()}@example.com`);
-  await createOrganization(page, "Acme", slug);
+  await signUpUi(page, "Kari", `kari-${unique()}@example.com`);
+  await createOrganizationUi(page, "Acme", slug);
   await expect(page.getByTestId("dashboard-links-count")).toHaveText("0");
 
   await page.goto(`/app/${slug}/organization`);
@@ -85,7 +49,7 @@ test("sign up, create an organization and a team, create a link, follow it, see 
 
 test("wrong password shows an error; sign out returns to the landing page", async ({ page }) => {
   const email = `ola-${unique()}@example.com`;
-  await signUp(page, "Ola", email);
+  await signUpUi(page, "Ola", email);
   await page.getByRole("button", { name: "Sign out" }).click();
   await page.waitForURL("/");
   await page.getByTestId("auth-email-input").fill(email);
@@ -101,29 +65,17 @@ test("an invitee registers through the emailed link and lands in the organizatio
   request,
 }) => {
   const slug = `acme-${unique()}`;
-  await signUp(page, "Owner", `owner-${unique()}@example.com`);
-  await createOrganization(page, "Acme", slug);
+  await signUpUi(page, "Owner", `owner-${unique()}@example.com`);
+  await createOrganizationUi(page, "Acme", slug);
   await page.goto(`/app/${slug}/organization`);
 
-  // The mailbox is a single global recording on the e2e server shared by every
-  // spec file; other files' tests reset and send mail concurrently (see
-  // auth-api.spec.ts), which can either shadow this invitee's message with a
-  // later index-0 one or, rarely, reset it away entirely between our send and
-  // our read. Match by recipient (never index 0) and retry the invite with a
-  // fresh recipient the rare time a concurrent reset wins the race.
-  let message: { to: string; text: string } | undefined;
-  let invitee = "";
-  for (let attempt = 0; !message && attempt < 3; attempt++) {
-    invitee = `new-${unique()}@example.com`;
-    await page.getByTestId("open-invite-member-button").click();
-    await page.getByTestId("invite-email-input").fill(invitee);
-    await page.getByTestId("send-invitation-button").click();
-    await expect(page.getByTestId(`invitation-${invitee}`)).toBeVisible();
-    const mail = await (await request.get("/api/_test/mail")).json();
-    message = (mail.messages as { to: string; text: string }[]).find((m) => m.to === invitee);
-  }
-  expect(message).toBeTruthy();
-  const link = message?.text.match(/\/app\/invitations\/[A-Za-z0-9-]+/)?.[0];
+  const invitee = `new-${unique()}@example.com`;
+  await page.getByTestId("open-invite-member-button").click();
+  await page.getByTestId("invite-email-input").fill(invitee);
+  await page.getByTestId("send-invitation-button").click();
+  await expect(page.getByTestId(`invitation-${invitee}`)).toBeVisible();
+  const mail = await lastMailTo(request, invitee);
+  const link = mail.text.match(/\/app\/invitations\/[A-Za-z0-9-]+/)?.[0];
   expect(link).toBeTruthy();
 
   const guest = await browser.newContext();
@@ -145,8 +97,8 @@ test("account deletion: a sole owner is blocked; a user with no organization del
   // (a) A sole owner of an organization must transfer ownership first — the
   // server refuses with LAST_OWNER, and the account must not be deleted.
   const ownerEmail = `owner-${unique()}@example.com`;
-  await signUp(page, "Solo Owner", ownerEmail);
-  await createOrganization(page, "Acme", `acme-${unique()}`);
+  await signUpUi(page, "Solo Owner", ownerEmail);
+  await createOrganizationUi(page, "Acme", `acme-${unique()}`);
   await page.goto("/app/settings");
   await page.getByTestId("settings-delete-password-input").fill(PASSWORD);
   await page.getByTestId("settings-delete-account-button").click();
@@ -156,7 +108,7 @@ test("account deletion: a sole owner is blocked; a user with no organization del
   await expect(page).toHaveURL(/\/app\/settings$/);
   await expect(page.getByTestId("settings-delete-account-button")).toBeVisible();
 
-  // Sign out before the second scenario: `signUp` navigates to "/", and a
+  // Sign out before the second scenario: `signUpUi` navigates to "/", and a
   // still-authenticated owner would bounce straight back into the app. The
   // settings page itself also has a "Sign out from this device" button, so
   // match the drawer's exactly.
@@ -167,7 +119,7 @@ test("account deletion: a sole owner is blocked; a user with no organization del
   // cleanly on the landing page (this used to crash into the root error
   // boundary — see final-review.md Important 1).
   const freshEmail = `fresh-${unique()}@example.com`;
-  await signUp(page, "Fresh User", freshEmail);
+  await signUpUi(page, "Fresh User", freshEmail);
   await page.goto("/app/settings");
   await page.getByTestId("settings-delete-password-input").fill(PASSWORD);
   await page.getByTestId("settings-delete-account-button").click();
