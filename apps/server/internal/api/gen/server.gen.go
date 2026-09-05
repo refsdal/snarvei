@@ -9,6 +9,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 
@@ -32,6 +33,27 @@ type ServerInterface interface {
 	// RejectInvitation Reject; the session's email must match.
 	// (POST /api/invitations/{invitationId}/reject)
 	RejectInvitation(w http.ResponseWriter, r *http.Request, invitationId InvitationId)
+	// ListLinks Links in an organization the caller can see, newest first, paged.
+	// (GET /api/links)
+	ListLinks(w http.ResponseWriter, r *http.Request, params ListLinksParams)
+	// CreateLink Create a link in a team. Generated slug unless a custom one is given. Rate limited.
+	// (POST /api/links)
+	CreateLink(w http.ResponseWriter, r *http.Request)
+	// DeleteLink Delete a link with its history and click events.
+	// (DELETE /api/links/{linkId})
+	DeleteLink(w http.ResponseWriter, r *http.Request, linkId LinkId)
+	// GetLink One link.
+	// (GET /api/links/{linkId})
+	GetLink(w http.ResponseWriter, r *http.Request, linkId LinkId)
+	// UpdateLink Update target, status, activation, title or description. The slug never changes.
+	// (PATCH /api/links/{linkId})
+	UpdateLink(w http.ResponseWriter, r *http.Request, linkId LinkId)
+	// GetLinkAnalytics Click analytics over the last N days.
+	// (GET /api/links/{linkId}/analytics)
+	GetLinkAnalytics(w http.ResponseWriter, r *http.Request, linkId LinkId, params GetLinkAnalyticsParams)
+	// ListLinkHistory Target changes, newest first, paged.
+	// (GET /api/links/{linkId}/history)
+	ListLinkHistory(w http.ResponseWriter, r *http.Request, linkId LinkId, params ListLinkHistoryParams)
 	// DeleteMe Delete the account. Refused with LAST_OWNER when the user is the sole owner of an organization.
 	// (DELETE /api/me)
 	DeleteMe(w http.ResponseWriter, r *http.Request)
@@ -218,6 +240,267 @@ func (siw *ServerInterfaceWrapper) RejectInvitation(w http.ResponseWriter, r *ht
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.RejectInvitation(w, r, invitationId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListLinks operation middleware
+func (siw *ServerInterfaceWrapper) ListLinks(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListLinksParams
+
+	// ------------- Required query parameter "organizationId" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "organizationId", r.URL.Query(), &params.OrganizationId, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "organizationId"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "organizationId", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "teamId" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "teamId", r.URL.Query(), &params.TeamId, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "teamId"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "teamId", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "page" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "page", r.URL.Query(), &params.Page, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "page"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "page", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "pageSize" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "pageSize", r.URL.Query(), &params.PageSize, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "pageSize"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "pageSize", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListLinks(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateLink operation middleware
+func (siw *ServerInterfaceWrapper) CreateLink(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateLink(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteLink operation middleware
+func (siw *ServerInterfaceWrapper) DeleteLink(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "linkId" -------------
+	var linkId LinkId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "linkId", r.PathValue("linkId"), &linkId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "linkId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteLink(w, r, linkId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetLink operation middleware
+func (siw *ServerInterfaceWrapper) GetLink(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "linkId" -------------
+	var linkId LinkId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "linkId", r.PathValue("linkId"), &linkId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "linkId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetLink(w, r, linkId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdateLink operation middleware
+func (siw *ServerInterfaceWrapper) UpdateLink(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "linkId" -------------
+	var linkId LinkId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "linkId", r.PathValue("linkId"), &linkId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "linkId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdateLink(w, r, linkId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetLinkAnalytics operation middleware
+func (siw *ServerInterfaceWrapper) GetLinkAnalytics(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "linkId" -------------
+	var linkId LinkId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "linkId", r.PathValue("linkId"), &linkId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "linkId", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetLinkAnalyticsParams
+
+	// ------------- Optional query parameter "days" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "days", r.URL.Query(), &params.Days, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "days"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "days", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetLinkAnalytics(w, r, linkId, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListLinkHistory operation middleware
+func (siw *ServerInterfaceWrapper) ListLinkHistory(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "linkId" -------------
+	var linkId LinkId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "linkId", r.PathValue("linkId"), &linkId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "linkId", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListLinkHistoryParams
+
+	// ------------- Optional query parameter "page" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "page", r.URL.Query(), &params.Page, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "page"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "page", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "pageSize" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "pageSize", r.URL.Query(), &params.PageSize, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "pageSize"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "pageSize", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListLinkHistory(w, r, linkId, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -832,6 +1115,13 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/teams/{teamId}/members", wrapper.ListTeamMembers)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/teams/{teamId}/members", wrapper.AddTeamMember)
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/api/teams/{teamId}/members/{userId}", wrapper.RemoveTeamMember)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/links", wrapper.ListLinks)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/links", wrapper.CreateLink)
+	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/api/links/{linkId}", wrapper.DeleteLink)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/links/{linkId}", wrapper.GetLink)
+	m.HandleFunc(http.MethodPatch+" "+options.BaseURL+"/api/links/{linkId}", wrapper.UpdateLink)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/links/{linkId}/history", wrapper.ListLinkHistory)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/links/{linkId}/analytics", wrapper.GetLinkAnalytics)
 
 	return m
 }
@@ -1142,6 +1432,549 @@ func (response RejectInvitation410JSONResponse) VisitRejectInvitationResponse(w 
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(410)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListLinksRequestObject struct {
+	Params ListLinksParams
+}
+
+type ListLinksResponseObject interface {
+	VisitListLinksResponse(w http.ResponseWriter) error
+}
+
+type ListLinks200JSONResponse LinkPage
+
+func (response ListLinks200JSONResponse) VisitListLinksResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListLinks400JSONResponse struct{ ValidationFailedJSONResponse }
+
+func (response ListLinks400JSONResponse) VisitListLinksResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListLinks401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response ListLinks401JSONResponse) VisitListLinksResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListLinks403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response ListLinks403JSONResponse) VisitListLinksResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListLinks404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response ListLinks404JSONResponse) VisitListLinksResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateLinkRequestObject struct {
+	Body *CreateLinkJSONRequestBody
+}
+
+type CreateLinkResponseObject interface {
+	VisitCreateLinkResponse(w http.ResponseWriter) error
+}
+
+type CreateLink201JSONResponse Link
+
+func (response CreateLink201JSONResponse) VisitCreateLinkResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateLink400JSONResponse struct{ ValidationFailedJSONResponse }
+
+func (response CreateLink400JSONResponse) VisitCreateLinkResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateLink401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response CreateLink401JSONResponse) VisitCreateLinkResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateLink403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response CreateLink403JSONResponse) VisitCreateLinkResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateLink404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response CreateLink404JSONResponse) VisitCreateLinkResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateLink409JSONResponse Error
+
+func (response CreateLink409JSONResponse) VisitCreateLinkResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateLink429JSONResponse struct{ RateLimitedJSONResponse }
+
+func (response CreateLink429JSONResponse) VisitCreateLinkResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteLinkRequestObject struct {
+	LinkId LinkId `json:"linkId"`
+}
+
+type DeleteLinkResponseObject interface {
+	VisitDeleteLinkResponse(w http.ResponseWriter) error
+}
+
+type DeleteLink204Response struct {
+}
+
+func (response DeleteLink204Response) VisitDeleteLinkResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type DeleteLink401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response DeleteLink401JSONResponse) VisitDeleteLinkResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteLink403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response DeleteLink403JSONResponse) VisitDeleteLinkResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteLink404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response DeleteLink404JSONResponse) VisitDeleteLinkResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetLinkRequestObject struct {
+	LinkId LinkId `json:"linkId"`
+}
+
+type GetLinkResponseObject interface {
+	VisitGetLinkResponse(w http.ResponseWriter) error
+}
+
+type GetLink200JSONResponse Link
+
+func (response GetLink200JSONResponse) VisitGetLinkResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetLink401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response GetLink401JSONResponse) VisitGetLinkResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetLink403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response GetLink403JSONResponse) VisitGetLinkResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetLink404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response GetLink404JSONResponse) VisitGetLinkResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateLinkRequestObject struct {
+	LinkId LinkId `json:"linkId"`
+	Body   *UpdateLinkJSONRequestBody
+}
+
+type UpdateLinkResponseObject interface {
+	VisitUpdateLinkResponse(w http.ResponseWriter) error
+}
+
+type UpdateLink200JSONResponse Link
+
+func (response UpdateLink200JSONResponse) VisitUpdateLinkResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateLink400JSONResponse struct{ ValidationFailedJSONResponse }
+
+func (response UpdateLink400JSONResponse) VisitUpdateLinkResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateLink401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response UpdateLink401JSONResponse) VisitUpdateLinkResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateLink403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response UpdateLink403JSONResponse) VisitUpdateLinkResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateLink404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response UpdateLink404JSONResponse) VisitUpdateLinkResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetLinkAnalyticsRequestObject struct {
+	LinkId LinkId `json:"linkId"`
+	Params GetLinkAnalyticsParams
+}
+
+type GetLinkAnalyticsResponseObject interface {
+	VisitGetLinkAnalyticsResponse(w http.ResponseWriter) error
+}
+
+type GetLinkAnalytics200JSONResponse Analytics
+
+func (response GetLinkAnalytics200JSONResponse) VisitGetLinkAnalyticsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetLinkAnalytics400JSONResponse struct{ ValidationFailedJSONResponse }
+
+func (response GetLinkAnalytics400JSONResponse) VisitGetLinkAnalyticsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetLinkAnalytics401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response GetLinkAnalytics401JSONResponse) VisitGetLinkAnalyticsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetLinkAnalytics403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response GetLinkAnalytics403JSONResponse) VisitGetLinkAnalyticsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetLinkAnalytics404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response GetLinkAnalytics404JSONResponse) VisitGetLinkAnalyticsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListLinkHistoryRequestObject struct {
+	LinkId LinkId `json:"linkId"`
+	Params ListLinkHistoryParams
+}
+
+type ListLinkHistoryResponseObject interface {
+	VisitListLinkHistoryResponse(w http.ResponseWriter) error
+}
+
+type ListLinkHistory200JSONResponse HistoryPage
+
+func (response ListLinkHistory200JSONResponse) VisitListLinkHistoryResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListLinkHistory400JSONResponse struct{ ValidationFailedJSONResponse }
+
+func (response ListLinkHistory400JSONResponse) VisitListLinkHistoryResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListLinkHistory401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response ListLinkHistory401JSONResponse) VisitListLinkHistoryResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListLinkHistory403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response ListLinkHistory403JSONResponse) VisitListLinkHistoryResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListLinkHistory404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response ListLinkHistory404JSONResponse) VisitListLinkHistoryResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -2321,6 +3154,27 @@ type StrictServerInterface interface {
 	// RejectInvitation Reject; the session's email must match.
 	// (POST /api/invitations/{invitationId}/reject)
 	RejectInvitation(ctx context.Context, request RejectInvitationRequestObject) (RejectInvitationResponseObject, error)
+	// ListLinks Links in an organization the caller can see, newest first, paged.
+	// (GET /api/links)
+	ListLinks(ctx context.Context, request ListLinksRequestObject) (ListLinksResponseObject, error)
+	// CreateLink Create a link in a team. Generated slug unless a custom one is given. Rate limited.
+	// (POST /api/links)
+	CreateLink(ctx context.Context, request CreateLinkRequestObject) (CreateLinkResponseObject, error)
+	// DeleteLink Delete a link with its history and click events.
+	// (DELETE /api/links/{linkId})
+	DeleteLink(ctx context.Context, request DeleteLinkRequestObject) (DeleteLinkResponseObject, error)
+	// GetLink One link.
+	// (GET /api/links/{linkId})
+	GetLink(ctx context.Context, request GetLinkRequestObject) (GetLinkResponseObject, error)
+	// UpdateLink Update target, status, activation, title or description. The slug never changes.
+	// (PATCH /api/links/{linkId})
+	UpdateLink(ctx context.Context, request UpdateLinkRequestObject) (UpdateLinkResponseObject, error)
+	// GetLinkAnalytics Click analytics over the last N days.
+	// (GET /api/links/{linkId}/analytics)
+	GetLinkAnalytics(ctx context.Context, request GetLinkAnalyticsRequestObject) (GetLinkAnalyticsResponseObject, error)
+	// ListLinkHistory Target changes, newest first, paged.
+	// (GET /api/links/{linkId}/history)
+	ListLinkHistory(ctx context.Context, request ListLinkHistoryRequestObject) (ListLinkHistoryResponseObject, error)
 	// DeleteMe Delete the account. Refused with LAST_OWNER when the user is the sole owner of an organization.
 	// (DELETE /api/me)
 	DeleteMe(ctx context.Context, request DeleteMeRequestObject) (DeleteMeResponseObject, error)
@@ -2556,6 +3410,202 @@ func (sh *strictHandler) RejectInvitation(w http.ResponseWriter, r *http.Request
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(RejectInvitationResponseObject); ok {
 		if err := validResponse.VisitRejectInvitationResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListLinks operation middleware
+func (sh *strictHandler) ListLinks(w http.ResponseWriter, r *http.Request, params ListLinksParams) {
+	var request ListLinksRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListLinks(ctx, request.(ListLinksRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListLinks")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListLinksResponseObject); ok {
+		if err := validResponse.VisitListLinksResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateLink operation middleware
+func (sh *strictHandler) CreateLink(w http.ResponseWriter, r *http.Request) {
+	var request CreateLinkRequestObject
+
+	var body CreateLinkJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateLink(ctx, request.(CreateLinkRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateLink")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateLinkResponseObject); ok {
+		if err := validResponse.VisitCreateLinkResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DeleteLink operation middleware
+func (sh *strictHandler) DeleteLink(w http.ResponseWriter, r *http.Request, linkId LinkId) {
+	var request DeleteLinkRequestObject
+
+	request.LinkId = linkId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DeleteLink(ctx, request.(DeleteLinkRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeleteLink")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DeleteLinkResponseObject); ok {
+		if err := validResponse.VisitDeleteLinkResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetLink operation middleware
+func (sh *strictHandler) GetLink(w http.ResponseWriter, r *http.Request, linkId LinkId) {
+	var request GetLinkRequestObject
+
+	request.LinkId = linkId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetLink(ctx, request.(GetLinkRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetLink")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetLinkResponseObject); ok {
+		if err := validResponse.VisitGetLinkResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// UpdateLink operation middleware
+func (sh *strictHandler) UpdateLink(w http.ResponseWriter, r *http.Request, linkId LinkId) {
+	var request UpdateLinkRequestObject
+
+	request.LinkId = linkId
+
+	var body UpdateLinkJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.UpdateLink(ctx, request.(UpdateLinkRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "UpdateLink")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(UpdateLinkResponseObject); ok {
+		if err := validResponse.VisitUpdateLinkResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetLinkAnalytics operation middleware
+func (sh *strictHandler) GetLinkAnalytics(w http.ResponseWriter, r *http.Request, linkId LinkId, params GetLinkAnalyticsParams) {
+	var request GetLinkAnalyticsRequestObject
+
+	request.LinkId = linkId
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetLinkAnalytics(ctx, request.(GetLinkAnalyticsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetLinkAnalytics")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetLinkAnalyticsResponseObject); ok {
+		if err := validResponse.VisitGetLinkAnalyticsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListLinkHistory operation middleware
+func (sh *strictHandler) ListLinkHistory(w http.ResponseWriter, r *http.Request, linkId LinkId, params ListLinkHistoryParams) {
+	var request ListLinkHistoryRequestObject
+
+	request.LinkId = linkId
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListLinkHistory(ctx, request.(ListLinkHistoryRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListLinkHistory")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListLinkHistoryResponseObject); ok {
+		if err := validResponse.VisitListLinkHistoryResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

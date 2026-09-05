@@ -6,6 +6,7 @@ package middleware
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math"
 	"net"
 	"net/http"
@@ -167,8 +168,40 @@ func RequireOrgAdmin() func(http.Handler) http.Handler {
 	}
 }
 
-// RequireTeam resolves {teamId}, the team's organization, the caller's org
-// role and team membership, and applies authz.CanAccessTeam.
+var (
+	ErrTeamNotFound  = errors.New("middleware: team not found")
+	ErrTeamForbidden = errors.New("middleware: team access denied")
+)
+
+// ResolveTeamAccess loads the team, the caller's org role and team
+// membership, and applies authz.CanAccessTeam. On ErrTeamForbidden the
+// returned TeamCtx is still populated (callers use it to tell a non-member
+// from a lookup failure).
+func ResolveTeamAccess(ctx context.Context, d Deps, userID, teamID string) (TeamCtx, error) {
+	team, err := d.Q.GetTeam(ctx, teamID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return TeamCtx{}, ErrTeamNotFound
+	}
+	if err != nil {
+		return TeamCtx{}, fmt.Errorf("middleware: load team: %w", err)
+	}
+	role, err := memberRole(ctx, d.Q, team.OrganizationID, userID)
+	if err != nil {
+		return TeamCtx{}, fmt.Errorf("middleware: membership lookup: %w", err)
+	}
+	n, err := d.Q.IsTeamMember(ctx, gen.IsTeamMemberParams{TeamID: teamID, UserID: userID})
+	if err != nil {
+		return TeamCtx{}, fmt.Errorf("middleware: team membership lookup: %w", err)
+	}
+	tc := TeamCtx{TeamID: teamID, OrgID: team.OrganizationID, UserID: userID, Role: role, IsTeamMember: n > 0}
+	if !authz.CanAccessTeam(tc.Role, tc.IsTeamMember) {
+		return tc, ErrTeamForbidden
+	}
+	return tc, nil
+}
+
+// RequireTeam resolves {teamId} via ResolveTeamAccess for the signed-in
+// caller.
 func RequireTeam(d Deps) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -178,28 +211,16 @@ func RequireTeam(d Deps) func(http.Handler) http.Handler {
 				return
 			}
 			teamID := r.PathValue("teamId")
-			team, err := d.Q.GetTeam(r.Context(), teamID)
-			if errors.Is(err, pgx.ErrNoRows) {
+			tc, err := ResolveTeamAccess(r.Context(), d, s.UserID, teamID)
+			switch {
+			case errors.Is(err, ErrTeamNotFound):
 				respond.Error(w, http.StatusNotFound, "NOT_FOUND", "Team not found")
 				return
-			}
-			if err != nil {
-				respond.Error(w, http.StatusInternalServerError, "INTERNAL", "team lookup failed")
-				return
-			}
-			role, err := memberRole(r.Context(), d.Q, team.OrganizationID, s.UserID)
-			if err != nil {
-				respond.Error(w, http.StatusInternalServerError, "INTERNAL", "membership lookup failed")
-				return
-			}
-			n, err := d.Q.IsTeamMember(r.Context(), gen.IsTeamMemberParams{TeamID: teamID, UserID: s.UserID})
-			if err != nil {
-				respond.Error(w, http.StatusInternalServerError, "INTERNAL", "team membership lookup failed")
-				return
-			}
-			tc := TeamCtx{TeamID: teamID, OrgID: team.OrganizationID, UserID: s.UserID, Role: role, IsTeamMember: n > 0}
-			if !authz.CanAccessTeam(tc.Role, tc.IsTeamMember) {
+			case errors.Is(err, ErrTeamForbidden):
 				respond.Error(w, http.StatusForbidden, "FORBIDDEN", "Team access denied")
+				return
+			case err != nil:
+				respond.Error(w, http.StatusInternalServerError, "INTERNAL", "team lookup failed")
 				return
 			}
 			next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), teamKey, tc)))
