@@ -5,8 +5,19 @@ const PASSWORD = "Playwright123";
 const ORIGIN = process.env.E2E_BASE_URL ?? "http://127.0.0.1:3300";
 const headers = { origin: ORIGIN, "content-type": "application/json" };
 
+// Limen's credential-password plugin throttles /signup/credential to 5
+// requests per 10s per client IP; every request in this file shares the
+// e2e stack's loopback IP, so retry through the throttle instead of assuming
+// a fixed number of prior sign-ups.
 async function signUp(request: APIRequestContext, name: string, email: string) {
-  const res = await request.post("/api/auth/signup/credential", { headers, data: { name, email, password: PASSWORD } });
+  let res = await request.post("/api/auth/signup/credential", { headers, data: { name, email, password: PASSWORD } });
+  for (let attempt = 0; res.status() === 429 && attempt < 8; attempt++) {
+    const retryAfter = Number(res.headers()["retry-after"]);
+    await new Promise((resolve) =>
+      setTimeout(resolve, (Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter : 2.5) * 1000),
+    );
+    res = await request.post("/api/auth/signup/credential", { headers, data: { name, email, password: PASSWORD } });
+  }
   expect(res.status(), await res.text()).toBe(200);
 }
 
@@ -132,12 +143,6 @@ test("existing account accepts an invitation; strangers are refused", async ({ r
 });
 
 test("password reset flow through the mailbox", async ({ request, playwright }) => {
-  // Limen's credential-password plugin throttles /signup/credential to 5
-  // requests per 10s per client IP (all requests in this file share the
-  // e2e stack's loopback IP). The three tests above already spent that
-  // budget (5 sign-ups); wait out the window so this test's own sign-up
-  // does not get a 429 instead of the 200 it actually returns once clear.
-  await new Promise((resolve) => setTimeout(resolve, 10_500));
   const email = `reset-${unique()}@example.com`;
   await signUp(request, "Reset Me", email);
   await request.delete("/api/_test/mail");
