@@ -19,10 +19,10 @@
     "lint:fix": "biome check --write ."
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.5.10",
-    "@playwright/test": "^1.62.1",
-    "@types/bun": "^1.4.0",
-    "@types/node": "^26.2.0",
+    "@biomejs/biome": "^2.5.15",
+    "@playwright/test": "^1.64.0",
+    "@types/bun": "^1.4.2",
+    "@types/node": "^26.6.5",
     "typescript": "^6.0.3"
   },
   "trustedDependencies": ["@biomejs/biome", "esbuild"]
